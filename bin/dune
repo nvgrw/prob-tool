@@ -1,4 +1,4 @@
 (executable
  (public_name pt)
- (name main)
- (libraries pt))
+ (name pt)
+ (libraries analysis llvm llvm.bitreader))

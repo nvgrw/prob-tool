@@ -1,2 +1,4 @@
 (library
- (name pt))
+ (name analysis)
+ (modules analysis)
+ (libraries llvm llvm.scalar_opts))

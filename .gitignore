@@ -34,3 +34,4 @@ pt.opam
 a.out
 *.swp
 .idea
+*.bc

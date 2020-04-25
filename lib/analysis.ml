@@ -26,15 +26,23 @@ let first_labeled_instr_in block =
   in
   helper (Llvm.instr_begin block)
 
-(* Labeling  *)
+(* Labeling *)
 let label_functions f =
   let label_instructions i =
     begin match Llvm.instr_opcode i with
-      | Llvm.Opcode.Alloca | Llvm.Opcode.BitCast | Llvm.Opcode.Call -> ()
-      | _ -> add_label_to i
+      (* | Llvm.Opcode.Alloca | Llvm.Opcode.BitCast | Llvm.Opcode.Call -> ()  *)
+      | Llvm.Opcode.Br
+      | Llvm.Opcode.Choose
+      | Llvm.Opcode.Switch
+      | Llvm.Opcode.Store
+      | Llvm.Opcode.Select
+      | Llvm.Opcode.PHI
+      | Llvm.Opcode.Ret
+        -> add_label_to i
+      | _ -> ()
     end;
     if not (is_void i) then Llvm.set_value_name "" i else ();
-    with_label i (fun l -> Printf.printf "%02d" l);
+    with_label i (fun l -> Printf.printf "%02d |" l);
     print_endline @@ Llvm.string_of_llvalue i
   in
   let label_blocks b =
@@ -46,6 +54,7 @@ let label_functions f =
     Llvm.iter_blocks label_blocks f)
   else ()
 
+(* Edges *)
 let edge_functions f =
   let edges = Mat.zeros !current_label !current_label in
   let edge_instructions i =
@@ -69,11 +78,12 @@ let edge_functions f =
 let analyze mdl =
   let pass_manager = Llvm.PassManager.create () in
   (* passes *)
-  Llvm_scalar_opts.add_memory_to_register_demotion pass_manager;
   Llvm_scalar_opts.add_cfg_simplification pass_manager;
+  Llvm_scalar_opts.add_instruction_combination pass_manager;
   Llvm_scalar_opts.add_constant_propagation pass_manager;
-  (* Llvm_scalar_opts.add_gvn pass_manager; *)
-  (* Llvm_scalar_opts.add_merged_load_store_motion pass_manager; *)
+  Llvm_scalar_opts.add_memory_to_register_promotion pass_manager;
+  (* Llvm_scalar_opts.add_memory_to_register_demotion pass_manager; *)
+  Llvm_scalar_opts.add_merged_load_store_motion pass_manager;
   (* end passes *)
   ignore @@ Llvm.PassManager.run_module mdl pass_manager;
   Llvm.PassManager.dispose pass_manager;

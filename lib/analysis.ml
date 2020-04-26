@@ -1,5 +1,6 @@
 
-module Mat = Owl.Sparse.Matrix.D
+(* module Mat = Owl.Sparse.Matrix.D *)
+module Mat = Owl.Mat
 
 let con = Llvm.global_context ()
 
@@ -25,23 +26,25 @@ let first_labeled_instr_in block =
     | Llvm.At_end _ -> assert false
   in
   helper (Llvm.instr_begin block)
+let is_labelable instr =
+  begin match Llvm.instr_opcode instr with
+    | Llvm.Opcode.Br
+    | Llvm.Opcode.Choose
+    | Llvm.Opcode.Switch
+    | Llvm.Opcode.Store
+    | Llvm.Opcode.Select
+    | Llvm.Opcode.Ret
+      -> true
+    | _ -> false
+  end
 
 (* Labeling *)
 let label_functions f =
   let label_instructions i =
-    begin match Llvm.instr_opcode i with
-      (* | Llvm.Opcode.Alloca | Llvm.Opcode.BitCast | Llvm.Opcode.Call -> ()  *)
-      | Llvm.Opcode.Br
-      | Llvm.Opcode.Choose
-      | Llvm.Opcode.Switch
-      | Llvm.Opcode.Store
-      | Llvm.Opcode.Select
-      | Llvm.Opcode.PHI
-      | Llvm.Opcode.Ret
-        -> add_label_to i
-      | _ -> ()
-    end;
-    if not (is_void i) then Llvm.set_value_name "" i else ();
+    if (is_labelable i) then
+      add_label_to i;
+    if not (is_void i) then
+      Llvm.set_value_name "" i;
     with_label i (fun l -> Printf.printf "%02d |" l);
     print_endline @@ Llvm.string_of_llvalue i
   in
@@ -49,10 +52,8 @@ let label_functions f =
     Printf.printf "%%%s:\n" (Llvm.value_name @@ Llvm.value_of_block b);
     Llvm.iter_instrs label_instructions b
   in
-  if not (Llvm.is_declaration f) then (
-    Printf.printf "(%s)\n" (Llvm.value_name f);
-    Llvm.iter_blocks label_blocks f)
-  else ()
+  Printf.printf "(%s)\n" (Llvm.value_name f);
+  Llvm.iter_blocks label_blocks f
 
 (* Edges *)
 let edge_functions f =
@@ -75,18 +76,59 @@ let edge_functions f =
   Llvm.iter_blocks edge_blocks f;
   edges
 
+let mat_project _dim _vars _expr _var = ()
+
+(* Translation *)
+let translate_functions f =
+  let variables = Llvm.fold_left_blocks (fun vs b ->
+      (Llvm.fold_left_instrs (fun vs i ->
+           match Llvm.instr_opcode i with
+           | Llvm.Opcode.Alloca -> i :: vs
+           | _ -> vs
+         ) [] b) @ vs) [] f in
+  let num_variables = List.length variables in
+  let dimension = 3 * num_variables in
+  Printf.printf "%d variables\n" num_variables;
+  let translate_instrs mats i = let _mat = Mat.zeros dimension dimension in
+    match Llvm.instr_opcode i with
+    | Llvm.Opcode.Store ->
+      print_endline @@ Llvm.string_of_llvalue @@ Llvm.operand i 1;
+      mats
+    | _ -> mats
+  in
+  Llvm.fold_left_blocks (fun mats b -> (
+        Llvm.fold_left_instrs (fun mats i ->
+            translate_instrs mats i) [] b) @ mats) [] f
+
 let analyze mdl =
   let pass_manager = Llvm.PassManager.create () in
   (* passes *)
   Llvm_scalar_opts.add_cfg_simplification pass_manager;
   Llvm_scalar_opts.add_instruction_combination pass_manager;
   Llvm_scalar_opts.add_constant_propagation pass_manager;
-  Llvm_scalar_opts.add_memory_to_register_promotion pass_manager;
-  (* Llvm_scalar_opts.add_memory_to_register_demotion pass_manager; *)
+  (* Llvm_scalar_opts.add_memory_to_register_promotion pass_manager; *)
+  Llvm_scalar_opts.add_memory_to_register_demotion pass_manager;
   Llvm_scalar_opts.add_merged_load_store_motion pass_manager;
+  Llvm_scalar_opts.add_dce pass_manager;
   (* end passes *)
   ignore @@ Llvm.PassManager.run_module mdl pass_manager;
   Llvm.PassManager.dispose pass_manager;
-  Llvm.iter_functions label_functions mdl;
-  Llvm.iter_functions (fun f -> Mat.print @@ edge_functions f) mdl;
+
+  (* remove declarations *)
+  Llvm.iter_functions begin fun f ->
+    if (Llvm.is_declaration f) then () else (
+      print_endline "<< Labeling >>";
+      label_functions f;
+      print_endline "<< Edge Generation >>";
+      let _edge_matrix = edge_functions f in
+      print_endline "<< Translation >>";
+      let translate_matrices = translate_functions f in
+      List.iter (fun mat ->
+          print_endline "::: ::: ::: ::: :::";
+          Mat.print ~header:false mat;
+          Format.pp_print_flush Format.std_formatter ();
+          print_endline "||| ||| ||| ||| |||";
+        ) translate_matrices
+    )
+  end mdl;
   ()

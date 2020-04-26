@@ -3,3 +3,4 @@
 *.bc
 build/
 cmake-build-debug/
+.idea

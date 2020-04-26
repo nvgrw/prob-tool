@@ -1,4 +1,0 @@
-(executable
- (public_name pt)
- (name pt)
- (libraries analysis llvm llvm.bitreader))

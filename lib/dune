@@ -1,7 +1,0 @@
-(library
- (name analysis)
- (modules analysis)
- (libraries
-  llvm llvm.scalar_opts
-  owl
-  ))

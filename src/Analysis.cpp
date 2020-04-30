@@ -10,6 +10,7 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Transforms/Scalar.h>
+#include <llvm/Transforms/Utils/Evaluator.h>
 
 #include <Eigen/Dense>
 
@@ -40,10 +41,9 @@ Analysis::Analysis(const std::string &Filename) {
   computeLabels();
   computeVariables();
 
-  // TODO(nvgrw): change this to accurate reflect # possible values
-  //  unsigned Dimension = 3 * Variables.size();
-
   printLabeled();
+
+  translateTransforms();
 }
 
 bool Analysis::hasLabel(const llvm::Value *Inst) const {
@@ -111,6 +111,28 @@ void Analysis::computeVariables() {
 
         Variables.push_back(AI);
       }
+  }
+}
+
+void Analysis::translateTransforms() {
+  // TODO(nvgrw): change this to accurately reflect # possible values
+  //  unsigned Dimension = 3 * Variables.size();
+
+  for (auto &F : Module->functions()) {
+    if (F.isDeclaration())
+      continue;
+
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        switch (I.getOpcode()) {
+        case Instruction::Store:
+          std::cout << "got a store" << std::endl;
+          break;
+        default:
+          break;
+        }
+      }
+    }
   }
 }
 

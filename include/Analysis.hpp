@@ -34,6 +34,7 @@ private:
   void prepareModule();
   void computeLabels();
   void computeVariables();
+  void translateTransforms();
 
   void printLabeled();
 };

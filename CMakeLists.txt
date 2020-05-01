@@ -22,12 +22,6 @@ find_package(Eigen3 REQUIRED)
 message(STATUS "Found Eigen3 in: ${EIGEN3_INCLUDE_DIR}")
 include_directories(${EIGEN3_INCLUDE_DIR})
 
-# Add Klee
-find_package(Klee REQUIRED CONFIG)
-message(STATUS "Found KLEE ${KLEE_PACKAGE_VERSION}")
-link_directories(${KLEE_LIBRARY_DIR})
-include_directories(${KLEE_INCLUDE_DIR})
-
 #if (NOT LLVM_ENABLE_RTTI)
 #  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 #endif()

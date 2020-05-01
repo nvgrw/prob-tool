@@ -15,7 +15,7 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 add_definitions(${LLVM_DEFINITIONS})
 include_directories(${LLVM_INCLUDE_DIRS})
 
-llvm_map_components_to_libnames(LLVM_LIBS support core scalarOpts bitReader)
+llvm_map_components_to_libnames(LLVM_LIBS support transformUtils core scalarOpts bitReader)
 
 # Add Eigen
 find_package(Eigen3 REQUIRED)

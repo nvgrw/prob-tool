@@ -15,12 +15,13 @@
 #include <Eigen/Dense>
 
 #include "Analysis.hpp"
+#include "Evaluator.hpp"
 
 using namespace llvm;
 using Eigen::MatrixXd;
 
 namespace {
-bool is_labelable(const Instruction *Inst) {
+bool isLabelable(const Instruction *Inst) {
   switch (Inst->getOpcode()) {
   case Instruction::Br:
   case Instruction::Choose:
@@ -71,10 +72,31 @@ void Analysis::prepareModule() {
   PM.add(createDeadCodeEliminationPass());
   PM.run(*Module);
 
-  // Remove the names from all values
+  // Remove calls, as calls are not supported.
+  // TODO(nvgrw): provide better error messages in cases where functions are not
+  // TODO(nvgrw): void functions. Could also improve by inlining first?
   for (auto &F : Module->functions()) {
     if (F.isDeclaration())
       continue;
+
+    for (auto &BB : F) {
+      for (BasicBlock::iterator II = BB.begin(), E = BB.end(); II != E;) {
+        CallInst *CI = dyn_cast<CallInst>(II++);
+        if (!CI)
+          continue;
+
+        CI->eraseFromParent();
+      }
+    }
+  }
+
+  // Remove the names from all values + declarations
+  for (Module::iterator FI = Module->begin(), E = Module->end(); FI != E;) {
+    Function &F = *FI++;
+    if (F.isDeclaration()) {
+      F.eraseFromParent();
+      continue;
+    }
 
     for (auto &BB : F)
       for (auto &I : BB)
@@ -84,12 +106,9 @@ void Analysis::prepareModule() {
 
 void Analysis::computeLabels() {
   for (auto &F : Module->functions()) {
-    if (F.isDeclaration())
-      continue;
-
     for (auto &BB : F) {
       for (auto &I : BB) {
-        if (!is_labelable(&I))
+        if (!isLabelable(&I))
           continue;
 
         Labels[&I] = MaxLabels++;
@@ -100,9 +119,6 @@ void Analysis::computeLabels() {
 
 void Analysis::computeVariables() {
   for (auto &F : Module->functions()) {
-    if (F.isDeclaration())
-      continue;
-
     for (auto &BB : F)
       for (auto &I : BB) {
         AllocaInst *AI = dyn_cast<AllocaInst>(&I);
@@ -118,29 +134,25 @@ void Analysis::translateTransforms() {
   // TODO(nvgrw): change this to accurately reflect # possible values
   //  unsigned Dimension = 3 * Variables.size();
 
-  for (auto &F : Module->functions()) {
-    if (F.isDeclaration())
-      continue;
+  // Create some kind of system that 'executes' the file from top to bottom,
+  // computing the values of expressions as we go. We could replace variables
+  // with 'instantiable constants' that are not actually constant but are
+  // evaluated as such.
 
+  pt::Evaluator Evaluator;
+  for (auto &V : Variables) {
+    Evaluator.markSymbolic(V);
+  }
+
+  for (auto &F : Module->functions()) {
     for (auto &BB : F) {
-      for (auto &I : BB) {
-        switch (I.getOpcode()) {
-        case Instruction::Store:
-          std::cout << "got a store" << std::endl;
-          break;
-        default:
-          break;
-        }
-      }
+      Evaluator.evaluate(BB, Module->getDataLayout());
     }
   }
 }
 
 void Analysis::printLabeled() {
   for (auto &F : Module->functions()) {
-    if (F.isDeclaration())
-      continue;
-
     std::printf("(%s)\n", F.getName().data());
     for (auto &BB : F) {
       std::printf("%s:\n", BB.getName().data());

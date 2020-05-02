@@ -34,6 +34,6 @@ file(GLOB SOURCES "src/*.cpp" "include/*.hpp")
 add_executable(prob-tool ${SOURCES})
 
 target_include_directories(prob-tool PRIVATE include)
-target_compile_options(prob-tool PUBLIC ${CMAKE_C_FLAGS} -Wall -Werror -pedantic)
+#target_compile_options(prob-tool PUBLIC ${CMAKE_C_FLAGS} -Wall -Werror -pedantic)
 
 target_link_libraries(prob-tool ${LLVM_LIBS})

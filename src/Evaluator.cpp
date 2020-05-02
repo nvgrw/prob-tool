@@ -18,47 +18,27 @@ bool Evaluator::isSymbolic(const llvm::AllocaInst *Instr) const {
   return Symbolic.find(Instr) != Symbolic.end();
 }
 
-void Evaluator::evaluate(llvm::BasicBlock &BB,
-                         const llvm ::DataLayout &DL) const {
+bool Evaluator::evaluateOnce(
+    llvm::Evaluator *EV, llvm::BasicBlock &BB,
+    std::unordered_map<const llvm::Value *, llvm::Constant *> const &Instance)
+    const {
   llvm::BasicBlock *NextBB = nullptr;
   llvm::BasicBlock::iterator CurInst = BB.begin();
-  llvm::Evaluator Evaluator(DL, nullptr);
   llvm::SmallVector<std::unique_ptr<llvm::GlobalVariable>, 10> AllocaTmps;
 
+  // TODO: only do this for variables that actually show up in this block
   for (const llvm::AllocaInst *Variable : Symbolic) {
-    // Alloca
-    llvm::Type *Ty = Variable->getAllocatedType();
-
-    llvm::Constant *InstanceValue =
-        llvm::Constant::getIntegerValue(Ty, llvm::APInt(64, 1, true));
-    AllocaTmps.push_back(std::make_unique<llvm::GlobalVariable>(
-        Ty, false, llvm::GlobalValue::InternalLinkage, InstanceValue,
-        Variable->getName(), llvm::GlobalValue::NotThreadLocal,
-        Variable->getType()->getPointerAddressSpace()));
     const llvm::Value *Value = llvm::cast<llvm::Value>(Variable);
-    Evaluator.setVal(const_cast<llvm::Value *>(Value), AllocaTmps.back().get());
+    llvm::Constant *InstanceValue = Instance.at(Value);
+
+    // Create a temporary variable used to refer to the concrete instance of
+    // the symbolic variable.
+    AllocaTmps.push_back(std::make_unique<llvm::GlobalVariable>(
+        Variable->getAllocatedType(), false, llvm::GlobalValue::InternalLinkage,
+        InstanceValue, Variable->getName(), llvm::GlobalValue::NotThreadLocal,
+        Variable->getType()->getPointerAddressSpace()));
+    EV->setVal(const_cast<llvm::Value *>(Value), AllocaTmps.back().get());
   }
 
-  __unused bool Status = Evaluator.EvaluateBlock(CurInst, NextBB);
+  return EV->EvaluateBlock(CurInst, NextBB);
 }
-
-/*
-std::unique_ptr<Expr> Evaluator::buildExpression(const llvm::Value *Value) {
-  // what is this value?
-  // if it's a constant, store that
-  // if it's a function, then cast & figure out how it's built
-  // otherwise, bail.
-
-  if (llvm::isa<llvm::Instruction>(Value)) {
-    const llvm::Instruction *Inst = llvm::cast<llvm::Instruction>(Value);
-    return nullptr;
-  }
-
-  if (llvm::isa<llvm::Constant>(Value)) {
-    const llvm::Constant *Const = llvm::cast<llvm::Constant>(Value);
-    return std::make_unique<ConstantExpr>(Const);
-  }
-
-  return nullptr;
-}
- */

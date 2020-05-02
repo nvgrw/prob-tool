@@ -131,14 +131,6 @@ void Analysis::computeVariables() {
 }
 
 void Analysis::translateTransforms() {
-  // TODO(nvgrw): change this to accurately reflect # possible values
-  //  unsigned Dimension = 3 * Variables.size();
-
-  // Create some kind of system that 'executes' the file from top to bottom,
-  // computing the values of expressions as we go. We could replace variables
-  // with 'instantiable constants' that are not actually constant but are
-  // evaluated as such.
-
   pt::Evaluator Evaluator;
   for (auto &V : Variables) {
     Evaluator.markSymbolic(V);
@@ -146,7 +138,20 @@ void Analysis::translateTransforms() {
 
   for (auto &F : Module->functions()) {
     for (auto &BB : F) {
-      Evaluator.evaluate(BB, Module->getDataLayout());
+      // Evaluate all possible combinations of variables
+      // TODO: figure out a scalable way to do this -- combine with some kind
+      // of value range analysis to keep matrices as small as possible.
+      llvm::Evaluator EV(Module->getDataLayout(), nullptr);
+      for (auto &V : Variables) {
+        for (uint64_t Value = 0; Value < 3; Value++) {
+        }
+      }
+//      Evaluator.evaluate(&EV, BB, )
+
+      // Convert instructions to matrices
+      for (auto &I : BB) {
+      }
+      //      Evaluator.evaluate(&EV, BB, { Variables[0]: llvm::C });
     }
   }
 }

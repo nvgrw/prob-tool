@@ -20,6 +20,7 @@ namespace llvm {
 class BasicBlock;
 class Evaluator;
 class Value;
+class TargetLibraryInfo;
 } // namespace llvm
 
 namespace pt {
@@ -43,7 +44,6 @@ protected:
   SymVar(const llvm::AllocaInst *Alloca) : Alloca(Alloca) {}
 
 private:
-  template <bool IsConst>
   class Iterator : public std::iterator<std::forward_iterator_tag, ValueT> {
     friend IntSymVar;
 
@@ -55,34 +55,25 @@ private:
     // Copy constructor, const -> const, nonconst -> nonconst
     Iterator(const Iterator &) = default;
 
-    // Copy constructor, nonconst -> const
-    template <bool IsConst_ = IsConst,
-              class = typename std::enable_if<IsConst_>::type>
-    Iterator(const Iterator<false> &RHS)
-        : Variable(RHS.Variable), Value(Value) {}
-
   public:
     Iterator &operator++() {
       static_cast<const ImplT *>(Variable)->next(this);
       return *this;
     }
-    bool operator!=(const Iterator &Rhs) {
-      return Value != Rhs.Value || Variable != Rhs.Variable;
+    bool operator==(const Iterator &Rhs) {
+      return Value == Rhs.Value && Variable == Rhs.Variable;
     }
+    bool operator!=(const Iterator &Rhs) { return !(*this == Rhs); }
 
-    ValueT &operator*() const { return *Value; }
+    ValueT *operator*() const { return Value; }
 
   protected:
-    Iterator(SymVarT *Variable, ValueT *Value)
+    Iterator(const SymVarT *Variable, ValueT *Value)
         : Variable(Variable), Value(Value) {}
   };
 
 public:
-  using iterator = Iterator</*IsConst=*/false>;
-  using const_iterator = Iterator</*IsConst=*/true>;
-
-  static_assert(std::is_trivially_copy_constructible<const_iterator>(),
-                "const_iterator needs to be trivially copy-constructible");
+  using iterator = Iterator;
 
 protected:
   virtual void next(iterator *Curr) const = 0;
@@ -126,23 +117,37 @@ private:
 
 // MARK: === EVALUATOR ===
 class Evaluator {
-  llvm::SmallPtrSet<IntSymVar const *, 10> Symbolic;
-
 public:
-  Evaluator() = default;
-
-public:
-  void markSymbolic(IntSymVar const *Var);
-  void unmarkSymbolic(IntSymVar const *Var);
-  bool isSymbolic(IntSymVar const *Var) const;
+  typedef llvm::SmallPtrSet<IntSymVar *, 10> SymbolicSetT;
+  typedef std::unordered_map<const llvm::Value *, llvm::Constant *>
+      EvalInstanceT;
 
 private:
+  const llvm::DataLayout &DL;
+  const llvm::TargetLibraryInfo *TLI;
+  SymbolicSetT Symbolic;
+
+public:
+  Evaluator(const llvm::DataLayout &DL, const llvm::TargetLibraryInfo *TLI)
+      : DL(DL), TLI(TLI) {}
+
+public:
+  void markSymbolic(IntSymVar *Var);
+  void unmarkSymbolic(IntSymVar *Var);
+  bool isSymbolic(IntSymVar *Var) const;
+
+  void evaluate(llvm::BasicBlock &BB);
+
+private:
+  void permuteVariablesAndExecute(unsigned VariableIndex,
+                                  SymbolicSetT::iterator VarIt,
+                                  llvm::BasicBlock &BB,
+                                  EvalInstanceT &Instance);
+
   // there is one evaluator PER RUN. We want to be able to query all the
   // evaluators with specific variable values + the value that we want
-
   bool evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
-                    std::unordered_map<const llvm::Value *,
-                                       llvm::Constant *> const &Instance) const;
+                    EvalInstanceT const &Instance) const;
 };
 } // namespace pt
 

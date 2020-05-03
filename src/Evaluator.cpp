@@ -1,23 +1,61 @@
 #include "Evaluator.hpp"
 
 #include <llvm/IR/Instructions.h>
+#include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/Evaluator.h>
+
 #include <memory>
+#include <string>
 
 using namespace pt;
 
-void Evaluator::markSymbolic(IntSymVar const *Var) { Symbolic.insert(Var); }
+void Evaluator::markSymbolic(IntSymVar *Var) { Symbolic.insert(Var); }
 
-void Evaluator::unmarkSymbolic(IntSymVar const *Var) { Symbolic.erase(Var); }
+void Evaluator::unmarkSymbolic(IntSymVar *Var) { Symbolic.erase(Var); }
 
-bool Evaluator::isSymbolic(IntSymVar const *Var) const {
+bool Evaluator::isSymbolic(IntSymVar *Var) const {
   return Symbolic.find(Var) != Symbolic.end();
 }
 
-bool Evaluator::evaluateOnce(
-    llvm::Evaluator *EV, llvm::BasicBlock &BB,
-    std::unordered_map<const llvm::Value *, llvm::Constant *> const &Instance)
-    const {
+void Evaluator::evaluate(llvm::BasicBlock &BB) {
+  std::unordered_map<const llvm::Value *, llvm::Constant *> Instance;
+  permuteVariablesAndExecute(0, Symbolic.begin(), BB, Instance);
+}
+
+void Evaluator::permuteVariablesAndExecute(unsigned VariableIndex,
+                                           SymbolicSetT::iterator VarIt,
+                                           llvm::BasicBlock &BB,
+                                           EvalInstanceT &Instance) {
+  if (VarIt == Symbolic.end()) {
+    return;
+  }
+
+  bool IsFirst = VarIt == Symbolic.begin();
+  IntSymVar *Variable = *VarIt;
+  SymbolicSetT::iterator VarItNext = ++VarIt;
+
+  unsigned ValueIndex = 0;
+  for (IntSymVar::iterator VIt = Variable->begin(), E = Variable->end();
+       VIt != E; /*todo: do i want this?*/ ++VIt) {
+    llvm::ConstantInt *Value = *VIt;
+    Instance[Variable->getAlloca()] = Value;
+    permuteVariablesAndExecute(VariableIndex + 1, VarItNext, BB, Instance);
+
+    // todo: do i want this
+    //    if (++VIt == E && !IsFirst) {
+    //      break;
+    //    }
+
+    //    llvm::Evaluator EV(DL, TLI);
+    //    evaluateOnce(&EV, BB, Instance);
+    std::printf("V%d: I%d\n", 4 - VariableIndex, ValueIndex);
+
+    ValueIndex++;
+  }
+}
+
+bool Evaluator::evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
+                             EvalInstanceT const &Instance) const {
   llvm::BasicBlock *NextBB = nullptr;
   llvm::BasicBlock::iterator CurInst = BB.begin();
   llvm::SmallVector<std::unique_ptr<llvm::GlobalVariable>, 10> AllocaTmps;

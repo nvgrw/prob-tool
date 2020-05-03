@@ -18,8 +18,6 @@
 
 namespace llvm {
 class BasicBlock;
-// class Constant;
-// class ConstantInt;
 class Evaluator;
 class Value;
 } // namespace llvm
@@ -39,6 +37,8 @@ protected:
 public:
   SymVar() = delete;
 
+  const llvm::AllocaInst *getAlloca() const { return Alloca; }
+
 protected:
   SymVar(const llvm::AllocaInst *Alloca) : Alloca(Alloca) {}
 
@@ -49,6 +49,7 @@ private:
 
     const SymVarT *Variable;
     ValueT *Value;
+    using ImplT = SymVar<SymVarT, ValueT>;
 
   public:
     // Copy constructor, const -> const, nonconst -> nonconst
@@ -62,8 +63,11 @@ private:
 
   public:
     Iterator &operator++() {
-      Variable->next(this);
+      static_cast<const ImplT *>(Variable)->next(this);
       return *this;
+    }
+    bool operator!=(const Iterator &Rhs) {
+      return Value != Rhs.Value || Variable != Rhs.Variable;
     }
 
     ValueT &operator*() const { return *Value; }
@@ -81,7 +85,7 @@ public:
                 "const_iterator needs to be trivially copy-constructible");
 
 protected:
-  virtual void next(iterator *Curr) = 0;
+  virtual void next(iterator *Curr) const = 0;
 };
 
 class IntSymVar : public SymVar<IntSymVar, llvm::ConstantInt> {
@@ -90,7 +94,7 @@ private:
   llvm::APInt Max;
 
 public:
-  IntSymVar(const llvm::AllocaInst *Alloca, llvm::APInt &Min, llvm::APInt &Max)
+  IntSymVar(const llvm::AllocaInst *Alloca, llvm::APInt Min, llvm::APInt Max)
       : SymVar(Alloca), Min(Min), Max(Max) {
     assert(Min.getBitWidth() == Max.getBitWidth() &&
            "Bitwidth of Min and Max must be the same.");
@@ -107,7 +111,7 @@ public:
   iterator end() { return iterator(this, nullptr); }
 
 private:
-  void next(iterator *Curr) override {
+  void next(iterator *Curr) const override {
     if (Curr->Value->getValue().sge(Max)) {
       Curr->Value = nullptr; // Reached End
       return;
@@ -122,15 +126,15 @@ private:
 
 // MARK: === EVALUATOR ===
 class Evaluator {
-  llvm::SmallPtrSet<const llvm::AllocaInst *, 10> Symbolic;
+  llvm::SmallPtrSet<IntSymVar const *, 10> Symbolic;
 
 public:
   Evaluator() = default;
 
 public:
-  void markSymbolic(const llvm::AllocaInst *Instr);
-  void unmarkSymbolic(const llvm::AllocaInst *Instr);
-  bool isSymbolic(const llvm::AllocaInst *Instr) const;
+  void markSymbolic(IntSymVar const *Var);
+  void unmarkSymbolic(IntSymVar const *Var);
+  bool isSymbolic(IntSymVar const *Var) const;
 
 private:
   // there is one evaluator PER RUN. We want to be able to query all the

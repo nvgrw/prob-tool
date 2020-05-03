@@ -9,6 +9,8 @@
 #include <llvm/IR/Module.h>
 #include <llvm/ADT/SmallVector.h>
 
+#include "Evaluator.hpp"
+
 namespace llvm {
   class AllocaInst;
   class Value;
@@ -19,7 +21,7 @@ private:
   llvm::LLVMContext Context;
   std::unique_ptr<llvm::Module> Module;
 
-  llvm::SmallVector<const llvm::AllocaInst *, 10> Variables;
+  llvm::SmallVector<pt::IntSymVar, 10> Variables;
   std::map<const llvm::Value *, unsigned> Labels;
   unsigned MaxLabels = 0;
 

@@ -125,7 +125,7 @@ void Analysis::computeVariables() {
         if (!AI)
           continue;
 
-        Variables.push_back(AI);
+        Variables.push_back(pt::IntSymVar(AI, APInt(64, 0, false), APInt(64, 2, false)));
       }
   }
 }
@@ -133,7 +133,7 @@ void Analysis::computeVariables() {
 void Analysis::translateTransforms() {
   pt::Evaluator Evaluator;
   for (auto &V : Variables) {
-    Evaluator.markSymbolic(V);
+    Evaluator.markSymbolic(&V);
   }
 
   for (auto &F : Module->functions()) {
@@ -141,16 +141,17 @@ void Analysis::translateTransforms() {
       // Evaluate all possible combinations of variables
       // TODO: figure out a scalable way to do this -- combine with some kind
       // of value range analysis to keep matrices as small as possible.
-      llvm::Evaluator EV(Module->getDataLayout(), nullptr);
+//      llvm::Evaluator EV(Module->getDataLayout(), nullptr);
       for (auto &V : Variables) {
-        for (uint64_t Value = 0; Value < 3; Value++) {
+        for (llvm::ConstantInt &CI : V) {
+          CI.dump();
         }
       }
 //      Evaluator.evaluate(&EV, BB, )
 
       // Convert instructions to matrices
-      for (auto &I : BB) {
-      }
+//      for (auto &I : BB) {
+//      }
       //      Evaluator.evaluate(&EV, BB, { Variables[0]: llvm::C });
     }
   }

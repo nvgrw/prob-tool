@@ -39,16 +39,24 @@ void Evaluator::permuteVariablesAndExecute(unsigned VariableIndex,
        VIt != E; /*todo: do i want this?*/ ++VIt) {
     llvm::ConstantInt *Value = *VIt;
     Instance[Variable->getAlloca()] = Value;
-    permuteVariablesAndExecute(VariableIndex + 1, VarItNext, BB, Instance);
 
-    // todo: do i want this
-    //    if (++VIt == E && !IsFirst) {
-    //      break;
-    //    }
+    if (VarItNext != Symbolic.end()) { // not at bottom level of tree
+      permuteVariablesAndExecute(VariableIndex + 1, VarItNext, BB, Instance);
+      continue;
+    }
 
+    for (auto &P : Instance) {
+      std::string Os;
+      llvm::raw_string_ostream Ros(Os);
+      P.second->print(Ros);
+      std::printf("%s ", Os.c_str());
+    }
+    std::printf("\n");
+
+    // Execute
     //    llvm::Evaluator EV(DL, TLI);
     //    evaluateOnce(&EV, BB, Instance);
-    std::printf("V%d: I%d\n", 4 - VariableIndex, ValueIndex);
+    //    std::printf("V%d: I%d\n", 4 - VariableIndex, ValueIndex);
 
     ValueIndex++;
   }

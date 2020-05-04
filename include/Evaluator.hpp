@@ -123,7 +123,7 @@ private:
 // MARK: === EVALUATOR ===
 class Evaluator {
 public:
-  typedef llvm::SmallPtrSet<IntSymVar *, 10> SymbolicSetT;
+  typedef llvm::SmallVector<IntSymVar *, 10> SymbolicSetT;
   struct StateAddressed {
     unsigned Index;
     unsigned Range;
@@ -144,7 +144,7 @@ private:
   SymbolicSetT Symbolic;
 
   llvm::Evaluator **States = nullptr;
-  int NumStates = 0;
+  unsigned NumStates = 0;
 
 public:
   Evaluator(const llvm::DataLayout &DL, const llvm::TargetLibraryInfo *TLI)
@@ -161,11 +161,20 @@ public:
   }
 
 public:
-  void markSymbolic(IntSymVar *Var);
-  void unmarkSymbolic(IntSymVar *Var);
-  bool isSymbolic(IntSymVar *Var) const;
+  void addSymbolic(IntSymVar *Var);
+  //  bool isSymbolic(IntSymVar *Var) const;
 
   void evaluate(llvm::BasicBlock &BB);
+
+  llvm::Constant *getValue(std::vector<StateAddressed> const &Location,
+                           llvm::Value *V) const;
+  inline llvm::Constant *getValue(unsigned StateIndex, llvm::Value *V) const {
+    return States[StateIndex]->getVal(V);
+  }
+  inline unsigned getNumStates() const { return NumStates; }
+
+  std::unique_ptr<std::vector<StateAddressed>>
+  getLocation(unsigned StateIndex) const;
 
 private:
   void permuteVariablesAndExecute(

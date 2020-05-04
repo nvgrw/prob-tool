@@ -8,13 +8,11 @@
 
 using namespace pt;
 
-void Evaluator::markSymbolic(IntSymVar *Var) { Symbolic.insert(Var); }
+void Evaluator::addSymbolic(IntSymVar *Var) { Symbolic.push_back(Var); }
 
-void Evaluator::unmarkSymbolic(IntSymVar *Var) { Symbolic.erase(Var); }
-
-bool Evaluator::isSymbolic(IntSymVar *Var) const {
-  return Symbolic.find(Var) != Symbolic.end();
-}
+// bool Evaluator::isSymbolic(IntSymVar *Var) const {
+//  return std::find(Symbolic.begin(), Symbolic.end(), Var) != Symbolic.end();
+//}
 
 void Evaluator::evaluate(llvm::BasicBlock &BB) {
   assert(!States &&
@@ -31,6 +29,38 @@ void Evaluator::evaluate(llvm::BasicBlock &BB) {
   States = new llvm::Evaluator *[NumStates];
   std::vector<Evaluator::InstanceElem> Instance(NumVariables);
   permuteVariablesAndExecute(Symbolic.begin(), BB, IndexMap, Instance);
+}
+
+llvm::Constant *Evaluator::getValue(const std::vector<StateAddressed> &Location,
+                                    llvm::Value *V) const {
+  assert(States && "getValue() called on unevaluated Evaluator");
+
+  unsigned Index = 0;
+  unsigned Multiplier = 1;
+  for (int I = Location.size() - 1; I >= 0; I--) {
+    Index += Location[I].Index * Multiplier;
+    Multiplier *= Location[I].Range;
+  }
+
+  return getValue(Index, V);
+}
+
+std::unique_ptr<std::vector<Evaluator::StateAddressed>>
+Evaluator::getLocation(unsigned int StateIndex) const {
+  auto Location =
+      std::make_unique<std::vector<Evaluator::StateAddressed>>(Symbolic.size());
+  for (int I = Symbolic.size() - 1; I >= 0; I--) {
+    unsigned Range = Symbolic[I]->getRange();
+    unsigned Index = StateIndex % Range;
+    (*Location)[I] = StateAddressed(Index, Range);
+    StateIndex -= Index;
+    StateIndex /= Range;
+    if (StateIndex == 0) {
+      break;
+    }
+  }
+
+  return std::move(Location);
 }
 
 void Evaluator::permuteVariablesAndExecute(

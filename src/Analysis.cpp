@@ -10,7 +10,6 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Transforms/Scalar.h>
-#include <llvm/Transforms/Utils/Evaluator.h>
 
 #include <Eigen/Dense>
 
@@ -138,22 +137,57 @@ void Analysis::translateTransforms() {
       std::cout << "BB " << BB.getName().data() << std::endl;
       pt::Evaluator Evaluator(Module->getDataLayout(), nullptr);
       for (auto &V : Variables) {
-        Evaluator.markSymbolic(&V);
+        Evaluator.addSymbolic(&V);
       }
       Evaluator.evaluate(BB);
-      //      llvm::Evaluator EV(Module->getDataLayout(), nullptr);
-      //      for (auto &V : Variables) {
-      //        for (llvm::ConstantInt &CI : V) {
-      //          CI.dump();
-      //        }
-      //      }
-      //      Evaluator.evaluate(&EV, BB, )
 
-      // Convert instructions to matrices
-      //      for (auto &I : BB) {
-      //      }
-      //      Evaluator.evaluate(&EV, BB, { Variables[0]: llvm::C });
+      for (auto &I : BB) {
+        if (!hasLabel(&I)) {
+          continue;
+        }
+
+        translateInstruction(Evaluator, &I);
+      }
     }
+  }
+}
+
+void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
+                                    llvm::Instruction const *Instruction) {
+  {
+    std::string OutString;
+    llvm::raw_string_ostream OutStream(OutString);
+    Instruction->print(OutStream);
+    std::printf("TR: (L%u) %s\n", Labels[Instruction], OutString.c_str());
+  }
+
+  switch (Instruction->getOpcode()) {
+  case Instruction::Store: {
+    const llvm::StoreInst *SI = llvm::cast<llvm::StoreInst>(Instruction);
+
+    unsigned NumStates = Evaluator.getNumStates();
+    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+      const llvm::Value *V = Evaluator.getValue(
+          StateIndex, const_cast<llvm::Value *>(SI->getValueOperand()));
+
+      // Print the state
+      auto Location = Evaluator.getLocation(StateIndex);
+      std::printf("Loc: ");
+      for (auto &I : *Location) {
+        std::printf("%u ", I.Index);
+      }
+      std::printf("| ");
+      {
+        std::string Os;
+        llvm::raw_string_ostream Ros(Os);
+        V->print(Ros);
+        std::printf("%s\n", Os.c_str());
+      }
+      // End of printing
+    }
+  } break;
+  default:
+    break;
   }
 }
 

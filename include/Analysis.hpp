@@ -1,19 +1,19 @@
 #ifndef PT_ANALYSIS_HPP
 #define PT_ANALYSIS_HPP
 
+#include <map>
 #include <memory>
 #include <string>
-#include <map>
 
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/ADT/SmallVector.h>
 
 #include "Evaluator.hpp"
 
 namespace llvm {
-  class AllocaInst;
-  class Value;
+class AllocaInst;
+class Value;
 } // namespace llvm
 
 class Analysis {
@@ -37,6 +37,8 @@ private:
   void computeLabels();
   void computeVariables();
   void translateTransforms();
+  void translateInstruction(pt::Evaluator const &Evaluator,
+                            llvm::Instruction const *Instruction);
 
   void printLabeled();
 };

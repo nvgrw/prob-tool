@@ -132,17 +132,15 @@ void Analysis::computeVariables() {
 }
 
 void Analysis::translateTransforms() {
-  pt::Evaluator Evaluator(Module->getDataLayout(), nullptr);
-  for (auto &V : Variables) {
-    Evaluator.markSymbolic(&V);
-  }
-
   for (auto &F : Module->functions()) {
     for (auto &BB : F) {
       // Evaluate all possible combinations of variables
       std::cout << "BB " << BB.getName().data() << std::endl;
+      pt::Evaluator Evaluator(Module->getDataLayout(), nullptr);
+      for (auto &V : Variables) {
+        Evaluator.markSymbolic(&V);
+      }
       Evaluator.evaluate(BB);
-
       //      llvm::Evaluator EV(Module->getDataLayout(), nullptr);
       //      for (auto &V : Variables) {
       //        for (llvm::ConstantInt &CI : V) {

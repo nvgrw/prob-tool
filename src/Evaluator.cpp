@@ -5,7 +5,6 @@
 #include <llvm/Transforms/Utils/Evaluator.h>
 
 #include <memory>
-#include <string>
 
 using namespace pt;
 
@@ -18,52 +17,68 @@ bool Evaluator::isSymbolic(IntSymVar *Var) const {
 }
 
 void Evaluator::evaluate(llvm::BasicBlock &BB) {
-  std::unordered_map<const llvm::Value *, llvm::Constant *> Instance;
-  permuteVariablesAndExecute(0, Symbolic.begin(), BB, Instance);
+  assert(!States &&
+         "evaluate() may only be run once on the same Evaluator instance");
+
+  std::unordered_map<const llvm::Value *, unsigned> IndexMap;
+  unsigned NumVariables = 0;
+  NumStates = 1;
+  for (pt::IntSymVar *SV : Symbolic) {
+    IndexMap[SV->getAlloca()] = NumVariables++;
+    NumStates *= SV->getRange();
+  }
+
+  States = new llvm::Evaluator *[NumStates];
+  Evaluator::EvalInstanceElem *Instance =
+      new Evaluator::EvalInstanceElem[NumVariables];
+  permuteVariablesAndExecute(Symbolic.begin(), BB, IndexMap, Instance);
+  delete[] Instance;
 }
 
-void Evaluator::permuteVariablesAndExecute(unsigned VariableIndex,
-                                           SymbolicSetT::iterator VarIt,
-                                           llvm::BasicBlock &BB,
-                                           EvalInstanceT &Instance) {
+void Evaluator::permuteVariablesAndExecute(
+    SymbolicSetT::iterator VarIt, llvm::BasicBlock &BB,
+    std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
+    EvalInstanceElem *Instance) {
   if (VarIt == Symbolic.end()) {
     return;
   }
 
-  bool IsFirst = VarIt == Symbolic.begin();
   IntSymVar *Variable = *VarIt;
+  unsigned VariableIndex = IndexMap.at(Variable->getAlloca());
   SymbolicSetT::iterator VarItNext = ++VarIt;
 
   unsigned ValueIndex = 0;
-  for (IntSymVar::iterator VIt = Variable->begin(), E = Variable->end();
-       VIt != E; /*todo: do i want this?*/ ++VIt) {
-    llvm::ConstantInt *Value = *VIt;
-    Instance[Variable->getAlloca()] = Value;
+  for (llvm::ConstantInt *Value : *Variable) {
+    Instance[VariableIndex] = {
+        .Value = Value, .Index = ValueIndex, .Range = Variable->getRange()};
 
     if (VarItNext != Symbolic.end()) { // not at bottom level of tree
-      permuteVariablesAndExecute(VariableIndex + 1, VarItNext, BB, Instance);
+      permuteVariablesAndExecute(VarItNext, BB, IndexMap, Instance);
+      ValueIndex++;
       continue;
     }
 
-    for (auto &P : Instance) {
-      std::string Os;
-      llvm::raw_string_ostream Ros(Os);
-      P.second->print(Ros);
-      std::printf("%s ", Os.c_str());
-    }
-    std::printf("\n");
-
     // Execute
-    //    llvm::Evaluator EV(DL, TLI);
-    //    evaluateOnce(&EV, BB, Instance);
-    //    std::printf("V%d: I%d\n", 4 - VariableIndex, ValueIndex);
+    llvm::Evaluator *EV = new llvm::Evaluator(DL, TLI);
+    evaluateOnce(EV, BB, IndexMap, Instance);
+
+    unsigned Index = 0;
+    unsigned Multiplier = 1;
+    for (int I = Symbolic.size() - 1; I >= 0; I--) {
+      Index += Instance[I].Index * Multiplier;
+      // ranges don't change but probably cheaper to store range in instance
+      Multiplier *= Instance[I].Range;
+    }
+    States[Index] = EV; // save the execution state
 
     ValueIndex++;
   }
 }
 
-bool Evaluator::evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
-                             EvalInstanceT const &Instance) const {
+bool Evaluator::evaluateOnce(
+    llvm::Evaluator *EV, llvm::BasicBlock &BB,
+    std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
+    EvalInstanceElem const *Instance) const {
   llvm::BasicBlock *NextBB = nullptr;
   llvm::BasicBlock::iterator CurInst = BB.begin();
   llvm::SmallVector<std::unique_ptr<llvm::GlobalVariable>, 10> AllocaTmps;
@@ -72,7 +87,7 @@ bool Evaluator::evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
   for (IntSymVar const *Variable : Symbolic) {
     const llvm::AllocaInst *AI = Variable->getAlloca();
     const llvm::Value *Value = llvm::cast<llvm::Value>(AI);
-    llvm::Constant *InstanceValue = Instance.at(Value);
+    llvm::Constant *InstanceValue = Instance[IndexMap.at(Value)].Value;
 
     // Create a temporary variable used to refer to the concrete instance of
     // the symbolic variable.

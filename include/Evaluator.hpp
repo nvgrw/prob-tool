@@ -9,6 +9,7 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/Transforms/Utils/Evaluator.h>
 
 /* TODO remove this note
  * Assumption: expressions are not dependent on control flow, i.e. a reg2mem
@@ -18,7 +19,6 @@
 
 namespace llvm {
 class BasicBlock;
-class Evaluator;
 class Value;
 class TargetLibraryInfo;
 } // namespace llvm
@@ -77,6 +77,7 @@ public:
 
 protected:
   virtual void next(iterator *Curr) const = 0;
+  virtual unsigned getRange() const = 0;
 };
 
 class IntSymVar : public SymVar<IntSymVar, llvm::ConstantInt> {
@@ -94,6 +95,9 @@ public:
 public:
   llvm::APInt const &getMin() const { return Min; }
   llvm::APInt const &getMax() const { return Max; }
+  unsigned getRange() const override {
+    return static_cast<unsigned>(Max.getSExtValue() - Min.getSExtValue() + 1);
+  }
   unsigned int getBitWidth() const { return Min.getBitWidth(); }
 
   iterator begin() {
@@ -119,17 +123,33 @@ private:
 class Evaluator {
 public:
   typedef llvm::SmallPtrSet<IntSymVar *, 10> SymbolicSetT;
-  typedef std::unordered_map<const llvm::Value *, llvm::Constant *>
-      EvalInstanceT;
+  struct EvalInstanceElem {
+    llvm::Constant *Value;
+    unsigned Index;
+    unsigned Range;
+  };
 
 private:
   const llvm::DataLayout &DL;
   const llvm::TargetLibraryInfo *TLI;
   SymbolicSetT Symbolic;
 
+  llvm::Evaluator **States = nullptr;
+  int NumStates = 0;
+
 public:
   Evaluator(const llvm::DataLayout &DL, const llvm::TargetLibraryInfo *TLI)
       : DL(DL), TLI(TLI) {}
+
+  ~Evaluator() {
+    if (!States)
+      return;
+
+    for (int I = 0; I < NumStates; I++) {
+      delete States[I];
+    }
+    delete[] States;
+  }
 
 public:
   void markSymbolic(IntSymVar *Var);
@@ -139,15 +159,17 @@ public:
   void evaluate(llvm::BasicBlock &BB);
 
 private:
-  void permuteVariablesAndExecute(unsigned VariableIndex,
-                                  SymbolicSetT::iterator VarIt,
-                                  llvm::BasicBlock &BB,
-                                  EvalInstanceT &Instance);
+  void permuteVariablesAndExecute(
+      SymbolicSetT::iterator VarIt, llvm::BasicBlock &BB,
+      std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
+      EvalInstanceElem *Instance);
 
   // there is one evaluator PER RUN. We want to be able to query all the
   // evaluators with specific variable values + the value that we want
-  bool evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
-                    EvalInstanceT const &Instance) const;
+  bool evaluateOnce(
+      llvm::Evaluator *EV, llvm::BasicBlock &BB,
+      std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
+      EvalInstanceElem const *Instance) const;
 };
 } // namespace pt
 

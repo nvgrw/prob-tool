@@ -79,12 +79,13 @@ public:
 protected:
   virtual void next(iterator *Curr) const = 0;
   virtual unsigned getRange() const = 0;
+  virtual unsigned getIndexOfValue(const llvm::Constant *V) const = 0;
 };
 
 class IntSymVar : public SymVar<IntSymVar, llvm::ConstantInt> {
 private:
-  llvm::APInt Min;
-  llvm::APInt Max;
+  const llvm::APInt Min;
+  const llvm::APInt Max;
 
 public:
   IntSymVar(const llvm::AllocaInst *Alloca, llvm::APInt Min, llvm::APInt Max)
@@ -98,6 +99,15 @@ public:
   llvm::APInt const &getMax() const { return Max; }
   unsigned getRange() const override {
     return static_cast<unsigned>(Max.getSExtValue() - Min.getSExtValue() + 1);
+  }
+  unsigned getIndexOfValue(const llvm::Constant *V) const override {
+    assert(llvm::isa<llvm::ConstantInt>(V) &&
+           "IntSymVar value index queried with non-ConstantInt type.");
+
+    const llvm::ConstantInt *CI = llvm::cast<llvm::ConstantInt>(V);
+    unsigned Index = (CI->getValue() - Min).getSExtValue();
+    assert (Index < getRange() && "Index out of range.");
+    return Index;
   }
   unsigned int getBitWidth() const { return Min.getBitWidth(); }
 

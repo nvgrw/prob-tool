@@ -29,16 +29,14 @@ void Evaluator::evaluate(llvm::BasicBlock &BB) {
   }
 
   States = new llvm::Evaluator *[NumStates];
-  Evaluator::EvalInstanceElem *Instance =
-      new Evaluator::EvalInstanceElem[NumVariables];
+  std::vector<Evaluator::InstanceElem> Instance(NumVariables);
   permuteVariablesAndExecute(Symbolic.begin(), BB, IndexMap, Instance);
-  delete[] Instance;
 }
 
 void Evaluator::permuteVariablesAndExecute(
     SymbolicSetT::iterator VarIt, llvm::BasicBlock &BB,
     std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
-    EvalInstanceElem *Instance) {
+    std::vector<InstanceElem> &Instance) {
   if (VarIt == Symbolic.end()) {
     return;
   }
@@ -49,8 +47,8 @@ void Evaluator::permuteVariablesAndExecute(
 
   unsigned ValueIndex = 0;
   for (llvm::ConstantInt *Value : *Variable) {
-    Instance[VariableIndex] = {
-        .Value = Value, .Index = ValueIndex, .Range = Variable->getRange()};
+    Instance[VariableIndex] =
+        InstanceElem(ValueIndex, Variable->getRange(), Value);
 
     if (VarItNext != Symbolic.end()) { // not at bottom level of tree
       permuteVariablesAndExecute(VarItNext, BB, IndexMap, Instance);
@@ -64,7 +62,7 @@ void Evaluator::permuteVariablesAndExecute(
 
     unsigned Index = 0;
     unsigned Multiplier = 1;
-    for (int I = Symbolic.size() - 1; I >= 0; I--) {
+    for (int I = Instance.size() - 1; I >= 0; I--) {
       Index += Instance[I].Index * Multiplier;
       // ranges don't change but probably cheaper to store range in instance
       Multiplier *= Instance[I].Range;
@@ -78,7 +76,7 @@ void Evaluator::permuteVariablesAndExecute(
 bool Evaluator::evaluateOnce(
     llvm::Evaluator *EV, llvm::BasicBlock &BB,
     std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
-    EvalInstanceElem const *Instance) const {
+    std::vector<InstanceElem> const &Instance) const {
   llvm::BasicBlock *NextBB = nullptr;
   llvm::BasicBlock::iterator CurInst = BB.begin();
   llvm::SmallVector<std::unique_ptr<llvm::GlobalVariable>, 10> AllocaTmps;

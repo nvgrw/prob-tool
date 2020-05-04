@@ -4,6 +4,7 @@
 
 #include <type_traits>
 #include <unordered_map>
+#include <vector>
 
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallPtrSet.h>
@@ -123,10 +124,18 @@ private:
 class Evaluator {
 public:
   typedef llvm::SmallPtrSet<IntSymVar *, 10> SymbolicSetT;
-  struct EvalInstanceElem {
-    llvm::Constant *Value;
+  struct StateAddressed {
     unsigned Index;
     unsigned Range;
+    StateAddressed() = default;
+    StateAddressed(unsigned Index, unsigned Range)
+        : Index(Index), Range(Range) {}
+  };
+  struct InstanceElem : public StateAddressed {
+    llvm::Constant *Value;
+    InstanceElem() = default;
+    InstanceElem(unsigned Index, unsigned Range, llvm::Constant *Value)
+        : StateAddressed(Index, Range), Value(Value) {}
   };
 
 private:
@@ -162,14 +171,14 @@ private:
   void permuteVariablesAndExecute(
       SymbolicSetT::iterator VarIt, llvm::BasicBlock &BB,
       std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
-      EvalInstanceElem *Instance);
+      std::vector<InstanceElem> &Instance);
 
   // there is one evaluator PER RUN. We want to be able to query all the
   // evaluators with specific variable values + the value that we want
   bool evaluateOnce(
       llvm::Evaluator *EV, llvm::BasicBlock &BB,
       std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
-      EvalInstanceElem const *Instance) const;
+      std::vector<InstanceElem> const &Instance) const;
 };
 } // namespace pt
 

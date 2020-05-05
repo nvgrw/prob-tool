@@ -128,7 +128,6 @@ void Analysis::computeVariables() {
         // TODO: remove all the extra structures
         Variables.push_back(
             pt::IntSymVar(AI, APInt(64, 0, false), APInt(64, 2, false)));
-        //        ValToSymvar[AI] = &Variables.back();
         ValToVarIndex[AI] = VariableIndex++;
       }
   }
@@ -168,50 +167,24 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
   switch (Instruction->getOpcode()) {
   case Instruction::Store: {
     const llvm::StoreInst *SI = llvm::cast<llvm::StoreInst>(Instruction);
-    unsigned StoreToVarIndex = ValToVarIndex[SI->getPointerOperand()];
     unsigned NumStates = Evaluator.getNumStates();
+    unsigned StoreToVarIndex = ValToVarIndex[SI->getPointerOperand()];
+    pt::IntSymVar const *Variable = &Variables[StoreToVarIndex];
 
-    for (unsigned VariableIndex = 0; VariableIndex < Variables.size();
-         VariableIndex++) {
-      pt::IntSymVar const *Variable = &Variables[VariableIndex];
-      unsigned Range = Variable->getRange();
-      if (VariableIndex != StoreToVarIndex) {
-        continue;
-      }
+    MatrixXd Matrix(NumStates, NumStates);
+    Matrix.setZero();
+    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+      const llvm::Constant *V = Evaluator.getValue(
+          StateIndex, const_cast<llvm::Value *>(SI->getValueOperand()));
 
-      MatrixXd Matrix(Range, Range);
-      Matrix.setZero();
-      for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
-        const llvm::Constant *V = Evaluator.getValue(
-            StateIndex, const_cast<llvm::Value *>(SI->getValueOperand()));
-        unsigned ValueIndex = Variable->getIndexOfValue(V);
-        auto Location = Evaluator.getLocation(StateIndex);
-        // todo: make this work for multiple variables -- what happens?
-        for (auto &I : *Location) {
-          Matrix(I.Index, ValueIndex) = 1.0;
-        }
-
-        //        std::printf("Map column VR%u VL%u\n", VariableIndex,
-        //        ValueIndex);
-
-        //      // Print the state
-        //      auto Location = Evaluator.getLocation(StateIndex);
-        //      std::printf("Loc: ");
-        //      for (auto &I : *Location) {
-        //        std::printf("%u ", I.Index);
-        //      }
-        //      std::printf("| ");
-        //      {
-        //        std::string Os;
-        //        llvm::raw_string_ostream Ros(Os);
-        //        V->print(Ros);
-        //        std::printf("%s\n", Os.c_str());
-        //      }
-        //      // End of printing
-      }
-
-      std::cout << Matrix << std::endl;
+      unsigned ValueIndex = Variable->getIndexOfValue(V);
+      auto Location = Evaluator.getLocation(StateIndex);
+      (*Location)[StoreToVarIndex].Index = ValueIndex;
+      unsigned DestinationStateIndex = Evaluator.getStateIndex(*Location);
+      Matrix(StateIndex, DestinationStateIndex) = 1.0;
     }
+
+    std::cout << Matrix << std::endl;
   } break;
   default:
     break;

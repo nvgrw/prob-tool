@@ -106,7 +106,7 @@ public:
 
     const llvm::ConstantInt *CI = llvm::cast<llvm::ConstantInt>(V);
     unsigned Index = (CI->getValue() - Min).getSExtValue();
-    assert (Index < getRange() && "Index out of range.");
+    assert(Index < getRange() && "Index out of range.");
     return Index;
   }
   unsigned int getBitWidth() const { return Min.getBitWidth(); }
@@ -172,7 +172,6 @@ public:
 
 public:
   void addSymbolic(IntSymVar *Var);
-  //  bool isSymbolic(IntSymVar *Var) const;
 
   void evaluate(llvm::BasicBlock &BB);
 
@@ -185,6 +184,7 @@ public:
 
   std::unique_ptr<std::vector<StateAddressed>>
   getLocation(unsigned StateIndex) const;
+  unsigned getStateIndex(std::vector<StateAddressed> const &Location) const;
 
 private:
   void permuteVariablesAndExecute(
@@ -192,8 +192,6 @@ private:
       std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
       std::vector<InstanceElem> &Instance);
 
-  // there is one evaluator PER RUN. We want to be able to query all the
-  // evaluators with specific variable values + the value that we want
   bool evaluateOnce(
       llvm::Evaluator *EV, llvm::BasicBlock &BB,
       std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,

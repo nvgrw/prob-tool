@@ -10,10 +10,6 @@ using namespace pt;
 
 void Evaluator::addSymbolic(IntSymVar *Var) { Symbolic.push_back(Var); }
 
-// bool Evaluator::isSymbolic(IntSymVar *Var) const {
-//  return std::find(Symbolic.begin(), Symbolic.end(), Var) != Symbolic.end();
-//}
-
 void Evaluator::evaluate(llvm::BasicBlock &BB) {
   assert(!States &&
          "evaluate() may only be run once on the same Evaluator instance");
@@ -34,14 +30,7 @@ void Evaluator::evaluate(llvm::BasicBlock &BB) {
 llvm::Constant *Evaluator::getValue(const std::vector<StateAddressed> &Location,
                                     llvm::Value *V) const {
   assert(States && "getValue() called on unevaluated Evaluator");
-
-  unsigned Index = 0;
-  unsigned Multiplier = 1;
-  for (int I = Location.size() - 1; I >= 0; I--) {
-    Index += Location[I].Index * Multiplier;
-    Multiplier *= Location[I].Range;
-  }
-
+  unsigned Index = getStateIndex(Location);
   return getValue(Index, V);
 }
 
@@ -51,16 +40,28 @@ Evaluator::getLocation(unsigned int StateIndex) const {
       std::make_unique<std::vector<Evaluator::StateAddressed>>(Symbolic.size());
   for (int I = Symbolic.size() - 1; I >= 0; I--) {
     unsigned Range = Symbolic[I]->getRange();
+    (*Location)[I].Range = Range;
+    if (StateIndex == 0) {
+      continue;
+    }
     unsigned Index = StateIndex % Range;
-    (*Location)[I] = StateAddressed(Index, Range);
+    (*Location)[I].Index = Index;
     StateIndex -= Index;
     StateIndex /= Range;
-    if (StateIndex == 0) {
-      break;
-    }
   }
 
   return std::move(Location);
+}
+
+unsigned
+Evaluator::getStateIndex(const std::vector<StateAddressed> &Location) const {
+  unsigned Index = 0;
+  unsigned Multiplier = 1;
+  for (int I = Location.size() - 1; I >= 0; I--) {
+    Index += Location[I].Index * Multiplier;
+    Multiplier *= Location[I].Range;
+  }
+  return Index;
 }
 
 void Evaluator::permuteVariablesAndExecute(

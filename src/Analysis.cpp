@@ -26,7 +26,6 @@ bool isLabelable(const Instruction *Inst) {
   case Instruction::Choose:
   case Instruction::Switch:
   case Instruction::Store:
-  case Instruction::Select:
   case Instruction::Ret:
     return true;
   default:
@@ -106,9 +105,15 @@ void Analysis::prepareModule() {
 void Analysis::computeLabels() {
   for (auto &F : Module->functions()) {
     for (auto &BB : F) {
+      bool BlockLabeled = false;
       for (auto &I : BB) {
         if (!isLabelable(&I))
           continue;
+
+        if (!BlockLabeled) {
+          BlockLabeled = true;
+          BasicBlockLabels[&BB] = MaxLabels;
+        }
 
         Labels[&I] = MaxLabels++;
       }
@@ -164,10 +169,12 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
     std::printf("TR: (L%u) %s\n", Labels[Instruction], OutString.c_str());
   }
 
+  unsigned NumStates = Evaluator.getNumStates();
+  unsigned FromLabel = Labels[Instruction];
+
   switch (Instruction->getOpcode()) {
   case Instruction::Store: {
     const llvm::StoreInst *SI = llvm::cast<llvm::StoreInst>(Instruction);
-    unsigned NumStates = Evaluator.getNumStates();
     unsigned StoreToVarIndex = ValToVarIndex[SI->getPointerOperand()];
     pt::IntSymVar const *Variable = &Variables[StoreToVarIndex];
 
@@ -186,8 +193,57 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
 
     std::cout << Matrix << std::endl;
   } break;
+  case Instruction::Choose: {
+    const llvm::ChooseInst *CI = llvm::cast<llvm::ChooseInst>(Instruction);
+
+    uint64_t WeightSum = 0;
+    for (auto &Choice : CI->choices()) {
+      WeightSum += Choice.getChoiceWeight()->getZExtValue();
+    }
+
+    MatrixXd Matrix(MaxLabels, MaxLabels);
+    Matrix.setZero();
+    for (auto &Choice : CI->choices()) {
+      unsigned ToLabel = BasicBlockLabels[Choice.getChoiceSuccessor()];
+      Matrix(FromLabel, ToLabel) =
+          Choice.getChoiceWeight()->getZExtValue() / (double)WeightSum;
+    }
+
+    std::cout << Matrix << std::endl;
+  } break;
+  case Instruction::Br: {
+    const llvm::BranchInst *BI = llvm::cast<llvm::BranchInst>(Instruction);
+    if (BI->isUnconditional()) {
+      // todo: handle unconditional
+      break;
+    }
+
+    MatrixXd Matrix(NumStates, NumStates);
+    Matrix.setZero();
+    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+      const llvm::Constant *V = Evaluator.getValue(
+          StateIndex, const_cast<llvm::Value *>(BI->getCondition()));
+      Matrix(StateIndex, StateIndex) = V->isZeroValue() ? 0.0 : 1.0;
+      // TODO: generate another matrix for !Condition + Edge transfer
+    }
+
+    std::cout << Matrix << std::endl;
+  } break;
+    //  case Instruction::Select: {
+    //    const llvm::SelectInst *SI =
+    //    llvm::cast<llvm::SelectInst>(Instruction);
+    //
+    //    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+    //      const llvm::Constant *V = Evaluator.getValue(
+    //          StateIndex, const_cast<llvm::Value *>(SI->getCondition()));
+    //      V->dump();
+    //    }
+    //  } break;
+    //  case Instruction::Switch:
+    //  case Instruction::Select:
+    //  case Instruction::Ret:
   default:
-    break;
+    llvm_unreachable("Unhandled labeled instruction type");
   }
 }
 

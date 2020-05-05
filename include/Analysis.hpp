@@ -26,6 +26,7 @@ private:
   std::unordered_map<const llvm::Value *, unsigned> ValToVarIndex;
 
   std::map<const llvm::Value *, unsigned> Labels;
+  std::map<const llvm::BasicBlock *, unsigned> BasicBlockLabels;
   unsigned MaxLabels = 0;
 
 public:

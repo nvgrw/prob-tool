@@ -16,6 +16,7 @@ namespace pt {
 
 class AllocContext {
   unsigned InstructionCount = 0;
+  unsigned MaxReg = 0;
   std::unordered_map<const llvm::Instruction *, unsigned> InstructionID;
   std::unique_ptr<llvm::LoopInfo> LoopInfo;
 
@@ -81,6 +82,9 @@ public:
     assert(LastBlock && "No last block found for header");
     return LastBlock;
   }
+
+  unsigned getMaxReg() const { return MaxReg; }
+  void setMaxReg(unsigned NewMaxReg) { MaxReg = NewMaxReg; }
 };
 
 void RegAlloc::allocate() const {
@@ -90,7 +94,25 @@ void RegAlloc::allocate() const {
 
     AllocContext Ctx(F);
     auto Intervals = buildIntervals(Ctx, F);
-    linearScan(Ctx, F, std::move(Intervals));
+    auto Allocations = linearScan(Ctx, std::move(Intervals));
+
+    for (const auto &BB : F) {
+      printf("(%s):\n", BB.getName().data());
+      for (const auto &I : BB) {
+        std::string S;
+        llvm::raw_string_ostream Rso(S);
+        I.print(Rso);
+
+        if (Allocations->find(&I) != Allocations->end()) {
+          printf("%02u = %02u: %s\n", (*Allocations)[&I], Ctx.getInstID(&I),
+                 S.c_str());
+        } else {
+          printf("XX = %02u: %s\n", Ctx.getInstID(&I), S.c_str());
+        }
+      }
+    }
+
+    printf("");
   }
 }
 
@@ -218,16 +240,17 @@ RegAlloc::buildIntervals(AllocContext &Ctx, const llvm::Function &Func) const {
 }
 
 /// Adapted from https://doi.org/10.1145/1064979.1064998
-void RegAlloc::linearScan(
-    AllocContext &Ctx, const llvm::Function &Func,
+std::unique_ptr<std::unordered_map<const llvm::Value *, unsigned>>
+RegAlloc::linearScan(
+    AllocContext &Ctx,
     std::unique_ptr<std::unordered_map<const llvm::Value *, Interval>>
         Intervals) const {
-
+  unsigned MaxReg = 0;
   std::deque<const llvm::Value *> Unhandled;
   for (const auto &Interval : *Intervals) {
     Unhandled.push_back(Interval.first);
   }
-  std::set<const llvm::Value *> Active, Inactive, Handled;
+  std::set<const llvm::Value *> Active, Inactive;
 
   // Sort intervals by lowest start first
   std::sort(Unhandled.begin(), Unhandled.end(),
@@ -248,7 +271,6 @@ void RegAlloc::linearScan(
       const Interval &It = (*Intervals)[ItV];
       if (It.getTo() <= Position) { // it ends before position
         AIt = Active.erase(AIt);
-        Handled.insert(ItV);
       } else if (!It.contains(Position)) { // it does not cover position
         AIt = Active.erase(AIt);
         Inactive.insert(ItV);
@@ -263,7 +285,6 @@ void RegAlloc::linearScan(
       const Interval &It = (*Intervals)[ItV];
       if (It.getTo() <= Position) { // it ends before position
         IIt = Inactive.erase(IIt);
-        Handled.insert(ItV);
       } else if (It.contains(Position)) {
         IIt = Inactive.erase(IIt);
         Active.insert(ItV);
@@ -273,17 +294,17 @@ void RegAlloc::linearScan(
     }
 
     // tryAllocateFreeReg
-    std::vector<unsigned> FreeUntilPos(RegCount, UINT_MAX);
+    std::vector<unsigned> FreeUntilPos(Active.size() + 1, UINT_MAX);
     for (const llvm::Value *ItV : Active) {
       const Interval &It = (*Intervals)[ItV];
       FreeUntilPos[It.getRegister()] = 0;
     }
 
     // reg = register with highest freeUntilPos
-    unsigned Reg = [RegCount = RegCount, &FreeUntilPos] {
+    unsigned Reg = [&FreeUntilPos] {
       unsigned HighestIndex = 0;
       unsigned HighestValue = FreeUntilPos[0];
-      for (unsigned Index = 0; Index < RegCount; Index++) {
+      for (unsigned Index = 0; Index < FreeUntilPos.size(); Index++) {
         if (FreeUntilPos[Index] > HighestValue) {
           HighestIndex = Index;
           HighestValue = FreeUntilPos[Index];
@@ -306,11 +327,22 @@ void RegAlloc::linearScan(
     }
 
     // If current has register then add to active
-    if (CurrentIt.getRegister() != -1)
+    if (CurrentIt.getRegister() != -1) {
       Active.insert(Current);
+      // Update max register
+      if (MaxReg < CurrentIt.getRegister()) {
+        MaxReg = CurrentIt.getRegister();
+      }
+    }
   }
 
-  printf("");
+  Ctx.setMaxReg(MaxReg);
+  auto Allocations =
+      std::make_unique<std::unordered_map<const llvm::Value *, unsigned>>();
+  for (const auto &Interval : *Intervals) {
+    (*Allocations)[Interval.first] = Interval.second.getRegister();
+  }
+  return std::move(Allocations);
 }
 
 } // namespace pt

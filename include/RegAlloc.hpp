@@ -96,7 +96,7 @@ public:
     }
 
     assert(Ranges.size() % 2 == 0 && "Range size should be multiple of 2");
-    for (unsigned I = 0; I < Ranges.size(); I += 2)  {
+    for (unsigned I = 0; I < Ranges.size(); I += 2) {
       if (Ranges[I] >= Value && Value <= Ranges[I + 1]) {
         return true;
       }
@@ -110,11 +110,9 @@ public:
 
 class RegAlloc {
   const llvm::Module &Module;
-  const unsigned RegCount;
 
 public:
-  RegAlloc(const llvm::Module &Module, unsigned RegCount)
-      : Module(Module), RegCount(RegCount) {}
+  RegAlloc(const llvm::Module &Module, unsigned RegCount) : Module(Module) {}
 
 public:
   void allocate() const;
@@ -123,8 +121,8 @@ private:
   std::unique_ptr<std::unordered_map<const llvm::Value *, Interval>>
   buildIntervals(AllocContext &Ctx, const llvm::Function &Func) const;
 
-  void
-  linearScan(AllocContext &Ctx, const llvm::Function &Func,
+  std::unique_ptr<std::unordered_map<const llvm::Value *, unsigned>>
+  linearScan(AllocContext &Ctx,
              std::unique_ptr<std::unordered_map<const llvm::Value *, Interval>>
                  Intervals) const;
 };

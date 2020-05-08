@@ -1,6 +1,7 @@
 
 #include "RegAlloc.hpp"
 
+#include <climits>
 #include <stack>
 #include <unordered_map>
 #include <unordered_set>
@@ -89,6 +90,7 @@ void RegAlloc::allocate() const {
 
     AllocContext Ctx(F);
     auto Intervals = buildIntervals(Ctx, F);
+    linearScan(Ctx, F, std::move(Intervals));
   }
 }
 
@@ -106,6 +108,7 @@ ValSet &getLiveIn(std::unordered_map<const llvm::BasicBlock *, ValSet> &LiveIn,
 }
 } // anonymous namespace
 
+/// Adapted from https://doi.org/10.1145/1772954.1772979
 std::unique_ptr<std::unordered_map<const llvm::Value *, Interval>>
 RegAlloc::buildIntervals(AllocContext &Ctx, const llvm::Function &Func) const {
   std::unordered_map<const llvm::BasicBlock *, ValSet> LiveInMap;
@@ -125,7 +128,7 @@ RegAlloc::buildIntervals(AllocContext &Ctx, const llvm::Function &Func) const {
 
     // Collect all successor phi values depending on BB
     std::stack<const llvm::BasicBlock *> BFSBlocks;
-    llvm::SmallPtrSet<const llvm::BasicBlock*, 32> BlockSeen;
+    llvm::SmallPtrSet<const llvm::BasicBlock *, 32> BlockSeen;
     BFSBlocks.push(&BB);
     while (!BFSBlocks.empty()) {
       const llvm::BasicBlock *StackBB = BFSBlocks.top();
@@ -212,6 +215,102 @@ RegAlloc::buildIntervals(AllocContext &Ctx, const llvm::Function &Func) const {
   }
 
   return std::move(Intervals);
+}
+
+/// Adapted from https://doi.org/10.1145/1064979.1064998
+void RegAlloc::linearScan(
+    AllocContext &Ctx, const llvm::Function &Func,
+    std::unique_ptr<std::unordered_map<const llvm::Value *, Interval>>
+        Intervals) const {
+
+  std::deque<const llvm::Value *> Unhandled;
+  for (const auto &Interval : *Intervals) {
+    Unhandled.push_back(Interval.first);
+  }
+  std::set<const llvm::Value *> Active, Inactive, Handled;
+
+  // Sort intervals by lowest start first
+  std::sort(Unhandled.begin(), Unhandled.end(),
+            [&](const auto &Left, const auto &Right) {
+              return Intervals->at(Left).getFrom() <
+                     Intervals->at(Right).getFrom();
+            });
+
+  while (!Unhandled.empty()) {
+    const llvm::Value *Current = Unhandled.front();
+    Interval &CurrentIt = (*Intervals)[Current];
+    Unhandled.pop_front();
+    unsigned Position = (*Intervals)[Current].getFrom();
+
+    // check for intervals in active that are handled or inactive
+    for (auto AIt = Active.begin(); AIt != Active.end();) {
+      const llvm::Value *ItV = *AIt;
+      const Interval &It = (*Intervals)[ItV];
+      if (It.getTo() <= Position) { // it ends before position
+        AIt = Active.erase(AIt);
+        Handled.insert(ItV);
+      } else if (!It.contains(Position)) { // it does not cover position
+        AIt = Active.erase(AIt);
+        Inactive.insert(ItV);
+      } else {
+        AIt++;
+      }
+    }
+
+    // check for intervals in inactive that are handled or active
+    for (auto IIt = Inactive.begin(); IIt != Inactive.end();) {
+      const llvm::Value *ItV = *IIt;
+      const Interval &It = (*Intervals)[ItV];
+      if (It.getTo() <= Position) { // it ends before position
+        IIt = Inactive.erase(IIt);
+        Handled.insert(ItV);
+      } else if (It.contains(Position)) {
+        IIt = Inactive.erase(IIt);
+        Active.insert(ItV);
+      } else {
+        IIt++;
+      }
+    }
+
+    // tryAllocateFreeReg
+    std::vector<unsigned> FreeUntilPos(RegCount, UINT_MAX);
+    for (const llvm::Value *ItV : Active) {
+      const Interval &It = (*Intervals)[ItV];
+      FreeUntilPos[It.getRegister()] = 0;
+    }
+
+    // reg = register with highest freeUntilPos
+    unsigned Reg = [RegCount = RegCount, &FreeUntilPos] {
+      unsigned HighestIndex = 0;
+      unsigned HighestValue = FreeUntilPos[0];
+      for (unsigned Index = 0; Index < RegCount; Index++) {
+        if (FreeUntilPos[Index] > HighestValue) {
+          HighestIndex = Index;
+          HighestValue = FreeUntilPos[Index];
+        }
+      }
+      return HighestIndex;
+    }();
+
+    if (FreeUntilPos[Reg] == 0) {
+      llvm_unreachable("No register available");
+    }
+
+    if (CurrentIt.getTo() <= FreeUntilPos[Reg]) {
+      // Register available for the whole interval
+      CurrentIt.setRegister(Reg);
+    } else {
+      // Register available for the first part of the interval
+      CurrentIt.setRegister(Reg);
+      llvm_unreachable("idk how to split");
+    }
+
+    // If current has register then add to active
+    if (CurrentIt.getRegister() != -1)
+      Active.insert(Current);
+  }
+
+  printf("");
 }
 
 } // namespace pt

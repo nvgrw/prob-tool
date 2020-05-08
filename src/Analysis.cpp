@@ -104,7 +104,7 @@ void Analysis::prepareModule() {
         I.setName("");
   }
 
-  pt::RegAlloc RA(*Module);
+  pt::RegAlloc RA(*Module, 10);
   RA.allocate();
 }
 

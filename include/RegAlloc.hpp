@@ -18,8 +18,9 @@ namespace pt {
 // Overlap not possible so we don't handle this
 // TODO: may be a good idea to handle it anyway
 class Interval {
-public:
+private:
   std::vector<unsigned> Ranges;
+  unsigned Register = -1;
 
 public:
   Interval() = default;
@@ -88,13 +89,32 @@ public:
       return;
     }
   }
+
+  bool contains(unsigned Value) const {
+    if (Ranges.empty()) {
+      return false;
+    }
+
+    assert(Ranges.size() % 2 == 0 && "Range size should be multiple of 2");
+    for (unsigned I = 0; I < Ranges.size(); I += 2)  {
+      if (Ranges[I] >= Value && Value <= Ranges[I + 1]) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+  unsigned getRegister() const { return Register; }
+  void setRegister(unsigned NewRegister) { Register = NewRegister; }
 };
 
 class RegAlloc {
   const llvm::Module &Module;
+  const unsigned RegCount;
 
 public:
-  RegAlloc(const llvm::Module &Module) : Module(Module) {}
+  RegAlloc(const llvm::Module &Module, unsigned RegCount)
+      : Module(Module), RegCount(RegCount) {}
 
 public:
   void allocate() const;
@@ -102,6 +122,11 @@ public:
 private:
   std::unique_ptr<std::unordered_map<const llvm::Value *, Interval>>
   buildIntervals(AllocContext &Ctx, const llvm::Function &Func) const;
+
+  void
+  linearScan(AllocContext &Ctx, const llvm::Function &Func,
+             std::unique_ptr<std::unordered_map<const llvm::Value *, Interval>>
+                 Intervals) const;
 };
 } // namespace pt
 

@@ -89,23 +89,6 @@ void RegAlloc::allocate() const {
 
     AllocContext Ctx(F);
     auto Intervals = buildIntervals(Ctx, F);
-
-    F.dump();
-
-    for (auto &P : *Intervals) {
-      {
-        std::string Ros;
-        llvm::raw_string_ostream Ro(Ros);
-        P.first->print(Ro);
-        std::printf("%s\n", Ros.c_str());
-      }
-
-      for (unsigned ID : P.second.Ranges) {
-        std::printf("%u ", ID);
-      }
-      std::printf("\n");
-    }
-    printf("");
   }
 }
 
@@ -142,10 +125,17 @@ RegAlloc::buildIntervals(AllocContext &Ctx, const llvm::Function &Func) const {
 
     // Collect all successor phi values depending on BB
     std::stack<const llvm::BasicBlock *> BFSBlocks;
+    llvm::SmallPtrSet<const llvm::BasicBlock*, 32> BlockSeen;
     BFSBlocks.push(&BB);
     while (!BFSBlocks.empty()) {
       const llvm::BasicBlock *StackBB = BFSBlocks.top();
       BFSBlocks.pop();
+      // Ensure we only process a block once
+      if (BlockSeen.find(StackBB) != BlockSeen.end()) {
+        continue;
+      }
+      BlockSeen.insert(StackBB);
+
       for (const llvm::BasicBlock *SuccBB : llvm::successors(StackBB)) {
         for (const llvm::PHINode &PHI : SuccBB->phis()) {
           int Index = PHI.getBasicBlockIndex(&BB);
@@ -178,6 +168,11 @@ RegAlloc::buildIntervals(AllocContext &Ctx, const llvm::Function &Func) const {
     // Main part
     for (auto IIt = BB.rbegin(), IE = BB.rend(); IIt != IE; IIt++) {
       const llvm::Instruction &Inst = *IIt;
+      // Don't process PHIs here
+      if (llvm::isa<llvm::PHINode>(&Inst)) {
+        continue;
+      }
+
       // Output operands (self)
       if (Inst.getType() != llvm::Type::getVoidTy(Inst.getContext())) {
         (*Intervals)[&Inst].setFrom(Ctx.getInstID(&Inst));
@@ -213,23 +208,7 @@ RegAlloc::buildIntervals(AllocContext &Ctx, const llvm::Function &Func) const {
     }
 
     // Update LiveIn for block
-    std::printf("LiveIn before (%s)\n", BB.getName().data());
-    auto LI  = getLiveIn(LiveInMap, &BB);
-    for (const auto &Z: LI) {
-      std::string S;
-      llvm::raw_string_ostream Ros(S);
-      Z->print(Ros);
-      std::printf("%s\n", S.c_str());
-    }
     getLiveIn(LiveInMap, &BB) = Live;
-    std::printf("LiveIn after\n");
-    auto LI2  = getLiveIn(LiveInMap, &BB);
-    for (const auto &Z: LI2) {
-      std::string S;
-      llvm::raw_string_ostream Ros(S);
-      Z->print(Ros);
-      std::printf("%s\n", S.c_str());
-    }
   }
 
   return std::move(Intervals);

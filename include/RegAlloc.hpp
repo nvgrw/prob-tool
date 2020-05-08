@@ -68,15 +68,23 @@ public:
 
     // Add range to end
     if (getTo() < From) {
-      Ranges.push_back(From);
-      Ranges.push_back(To);
+      if (From - 1 == *Ranges.end()) {
+        *Ranges.end() = To;
+      } else {
+        Ranges.push_back(From);
+        Ranges.push_back(To);
+      }
       return;
     }
 
     // Add range to start
     if (To < getFrom()) {
-      Ranges.insert(Ranges.begin(), To);
-      Ranges.insert(Ranges.begin(), From);
+      if (To + 1 == *Ranges.begin()) {
+        *Ranges.begin() = From;
+      } else {
+        Ranges.insert(Ranges.begin(), To);
+        Ranges.insert(Ranges.begin(), From);
+      }
       return;
     }
   }

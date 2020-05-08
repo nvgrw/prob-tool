@@ -10,11 +10,13 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Transforms/Scalar.h>
+#include <llvm/Transforms/Utils.h>
 
 #include <Eigen/Dense>
 
 #include "Analysis.hpp"
 #include "Evaluator.hpp"
+#include "RegAlloc.hpp"
 
 using namespace llvm;
 using Eigen::MatrixXd;
@@ -64,42 +66,46 @@ void Analysis::readAndParse(const std::string &Filename) {
 
 void Analysis::prepareModule() {
   legacy::PassManager PM;
-  PM.add(createCFGSimplificationPass());
+  //  PM.add(createCFGSimplificationPass());
   PM.add(createConstantPropagationPass());
-  PM.add(createDemoteRegisterToMemoryPass());
+  PM.add(createPromoteMemoryToRegisterPass());
+  //  PM.add(createDemoteRegisterToMemoryPass());
   PM.add(createDeadCodeEliminationPass());
   PM.run(*Module);
 
   // Remove calls, as calls are not supported.
   // TODO(nvgrw): provide better error messages in cases where functions are not
   // TODO(nvgrw): void functions. Could also improve by inlining first?
-  for (auto &F : Module->functions()) {
-    if (F.isDeclaration())
-      continue;
-
-    for (auto &BB : F) {
-      for (BasicBlock::iterator II = BB.begin(), E = BB.end(); II != E;) {
-        CallInst *CI = dyn_cast<CallInst>(II++);
-        if (!CI)
-          continue;
-
-        CI->eraseFromParent();
-      }
-    }
-  }
+  //  for (auto &F : Module->functions()) {
+  //    if (F.isDeclaration())
+  //      continue;
+  //
+  //    for (auto &BB : F) {
+  //      for (BasicBlock::iterator II = BB.begin(), E = BB.end(); II != E;) {
+  //        CallInst *CI = dyn_cast<CallInst>(II++);
+  //        if (!CI)
+  //          continue;
+  //
+  //        CI->eraseFromParent();
+  //      }
+  //    }
+  //  }
 
   // Remove the names from all values + declarations
   for (Module::iterator FI = Module->begin(), E = Module->end(); FI != E;) {
     Function &F = *FI++;
-    if (F.isDeclaration()) {
-      F.eraseFromParent();
-      continue;
-    }
+    //    if (F.isDeclaration()) {
+    //      F.eraseFromParent();
+    //      continue;
+    //    }
 
     for (auto &BB : F)
       for (auto &I : BB)
         I.setName("");
   }
+
+  pt::RegAlloc RA(*Module);
+  RA.allocate();
 }
 
 void Analysis::computeLabels() {

@@ -17,6 +17,7 @@ class AllocaInst;
 class Value;
 } // namespace llvm
 
+// todo: put in pt namespace
 class Analysis {
 private:
   llvm::LLVMContext Context;

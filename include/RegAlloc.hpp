@@ -1,6 +1,7 @@
 #ifndef PT_REGALLOC_HPP
 #define PT_REGALLOC_HPP
 
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -115,7 +116,12 @@ public:
   RegAlloc(const llvm::Module &Module, unsigned RegCount) : Module(Module) {}
 
 public:
-  void allocate() const;
+  std::unordered_map<
+      const llvm::Function *,
+      std::tuple<
+          std::unique_ptr<std::unordered_map<const llvm::Value *, unsigned>>,
+          unsigned>>
+  allocate() const;
 
 private:
   std::unique_ptr<std::unordered_map<const llvm::Value *, Interval>>

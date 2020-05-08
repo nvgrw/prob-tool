@@ -87,7 +87,19 @@ public:
   void setMaxReg(unsigned NewMaxReg) { MaxReg = NewMaxReg; }
 };
 
-void RegAlloc::allocate() const {
+std::unordered_map<
+    const llvm::Function *,
+    std::tuple<
+        std::unique_ptr<std::unordered_map<const llvm::Value *, unsigned>>,
+        unsigned>>
+RegAlloc::allocate() const {
+  std::unordered_map<
+      const llvm::Function *,
+      std::tuple<
+          std::unique_ptr<std::unordered_map<const llvm::Value *, unsigned>>,
+          unsigned>>
+      Result;
+
   for (const auto &F : Module.functions()) {
     if (F.isDeclaration())
       continue;
@@ -95,25 +107,10 @@ void RegAlloc::allocate() const {
     AllocContext Ctx(F);
     auto Intervals = buildIntervals(Ctx, F);
     auto Allocations = linearScan(Ctx, std::move(Intervals));
-
-    for (const auto &BB : F) {
-      printf("(%s):\n", BB.getName().data());
-      for (const auto &I : BB) {
-        std::string S;
-        llvm::raw_string_ostream Rso(S);
-        I.print(Rso);
-
-        if (Allocations->find(&I) != Allocations->end()) {
-          printf("%02u = %02u: %s\n", (*Allocations)[&I], Ctx.getInstID(&I),
-                 S.c_str());
-        } else {
-          printf("XX = %02u: %s\n", Ctx.getInstID(&I), S.c_str());
-        }
-      }
-    }
-
-    printf("");
+    Result[&F] = std::make_tuple(std::move(Allocations), Ctx.getMaxReg());
   }
+
+  return Result;
 }
 
 namespace {

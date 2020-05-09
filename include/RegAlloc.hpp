@@ -113,7 +113,7 @@ class RegAlloc {
   const llvm::Module &Module;
 
 public:
-  RegAlloc(const llvm::Module &Module, unsigned RegCount) : Module(Module) {}
+  RegAlloc(const llvm::Module &Module) : Module(Module) {}
 
 public:
   std::unordered_map<

@@ -12,12 +12,6 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Transforms/Utils/Evaluator.h>
 
-/* TODO remove this note
- * Assumption: expressions are not dependent on control flow, i.e. a reg2mem
- * pass was executed and values that cross basic blocks are stored in alloca'd
- * variables (represented by llvm::Instruction in SymbolicExpr).
- */
-
 namespace llvm {
 class BasicBlock;
 class Value;
@@ -34,15 +28,13 @@ template <class SymVarT, class ValueT,
               std::is_base_of<llvm::Constant, ValueT>::value>::type>
 class SymVar {
 protected:
-  const llvm::AllocaInst *Alloca;
+  llvm::LLVMContext &Context;
 
 public:
   SymVar() = delete;
 
-  const llvm::AllocaInst *getAlloca() const { return Alloca; }
-
 protected:
-  SymVar(const llvm::AllocaInst *Alloca) : Alloca(Alloca) {}
+  SymVar(llvm::LLVMContext &Context) : Context(Context) {}
 
 private:
   class Iterator : public std::iterator<std::forward_iterator_tag, ValueT> {
@@ -88,8 +80,8 @@ private:
   const llvm::APInt Max;
 
 public:
-  IntSymVar(const llvm::AllocaInst *Alloca, llvm::APInt Min, llvm::APInt Max)
-      : SymVar(Alloca), Min(Min), Max(Max) {
+  IntSymVar(llvm::LLVMContext &Context, llvm::APInt Min, llvm::APInt Max)
+      : SymVar(Context), Min(Min), Max(Max) {
     assert(Min.getBitWidth() == Max.getBitWidth() &&
            "Bitwidth of Min and Max must be the same.");
   }
@@ -112,7 +104,7 @@ public:
   unsigned int getBitWidth() const { return Min.getBitWidth(); }
 
   iterator begin() {
-    return iterator(this, llvm::ConstantInt::get(Alloca->getContext(), Min));
+    return iterator(this, llvm::ConstantInt::get(Context, Min));
   }
   iterator end() { return iterator(this, nullptr); }
 
@@ -133,7 +125,6 @@ private:
 // MARK: === EVALUATOR ===
 class Evaluator {
 public:
-  typedef llvm::SmallVector<IntSymVar *, 10> SymbolicSetT;
   struct StateAddressed {
     unsigned Index;
     unsigned Range;
@@ -151,14 +142,16 @@ public:
 private:
   const llvm::DataLayout &DL;
   const llvm::TargetLibraryInfo *TLI;
-  SymbolicSetT Symbolic;
+  const std::unordered_map<const llvm::Value *, unsigned> IndexMap;
+  const std::vector<IntSymVar *> Symbolic;
 
+  const unsigned NumStates;
   llvm::Evaluator **States = nullptr;
-  unsigned NumStates = 0;
 
 public:
-  Evaluator(const llvm::DataLayout &DL, const llvm::TargetLibraryInfo *TLI)
-      : DL(DL), TLI(TLI) {}
+  Evaluator(const llvm::DataLayout &DL, const llvm::TargetLibraryInfo *TLI,
+            std::unordered_map<const llvm::Value *, unsigned> IndexMap,
+            const std::vector<IntSymVar *> &Symbolic);
 
   ~Evaluator() {
     if (!States)
@@ -171,8 +164,6 @@ public:
   }
 
 public:
-  void addSymbolic(IntSymVar *Var);
-
   void evaluate(llvm::BasicBlock &BB);
 
   llvm::Constant *getValue(std::vector<StateAddressed> const &Location,
@@ -187,15 +178,13 @@ public:
   unsigned getStateIndex(std::vector<StateAddressed> const &Location) const;
 
 private:
-  void permuteVariablesAndExecute(
-      SymbolicSetT::iterator VarIt, llvm::BasicBlock &BB,
-      std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
-      std::vector<InstanceElem> &Instance);
+  void
+  permuteVariablesAndExecute(std::vector<IntSymVar *>::const_iterator VarIt,
+                             llvm::BasicBlock &BB,
+                             std::vector<InstanceElem> &Instance);
 
-  bool evaluateOnce(
-      llvm::Evaluator *EV, llvm::BasicBlock &BB,
-      std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
-      std::vector<InstanceElem> const &Instance) const;
+  bool evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
+                    std::vector<InstanceElem> const &Instance) const;
 };
 } // namespace pt
 

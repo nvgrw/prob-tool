@@ -23,7 +23,7 @@ private:
   llvm::LLVMContext Context;
   std::unique_ptr<llvm::Module> Module;
 
-  llvm::SmallVector<pt::IntSymVar, 10> Variables;
+  std::vector<pt::IntSymVar *> Variables;
   std::unordered_map<const llvm::Value *, unsigned> ValToVarIndex;
 
   std::map<const llvm::Value *, unsigned> Labels;
@@ -32,6 +32,11 @@ private:
 
 public:
   Analysis(const std::string &Filename);
+  ~Analysis() {
+    for (auto *Variable : Variables) {
+      delete Variable;
+    }
+  }
 
 private:
   bool hasLabel(const llvm::Value *Inst) const;

@@ -16,7 +16,7 @@ namespace pt {
 
 class AllocContext {
   unsigned InstructionCount = 0;
-  unsigned MaxReg = 0;
+  unsigned NumReg = 0;
   std::unordered_map<const llvm::Instruction *, unsigned> InstructionID;
   std::unique_ptr<llvm::LoopInfo> LoopInfo;
 
@@ -83,8 +83,8 @@ public:
     return LastBlock;
   }
 
-  unsigned getMaxReg() const { return MaxReg; }
-  void setMaxReg(unsigned NewMaxReg) { MaxReg = NewMaxReg; }
+  unsigned getNumReg() const { return NumReg; }
+  void setNumReg(unsigned NewNumReg) { NumReg = NewNumReg; }
 };
 
 std::unordered_map<
@@ -107,7 +107,7 @@ RegAlloc::allocate() const {
     AllocContext Ctx(F);
     auto Intervals = buildIntervals(Ctx, F);
     auto Allocations = linearScan(Ctx, std::move(Intervals));
-    Result[&F] = std::make_tuple(std::move(Allocations), Ctx.getMaxReg());
+    Result[&F] = std::make_tuple(std::move(Allocations), Ctx.getNumReg());
   }
 
   return Result;
@@ -242,7 +242,7 @@ RegAlloc::linearScan(
     AllocContext &Ctx,
     std::unique_ptr<std::unordered_map<const llvm::Value *, Interval>>
         Intervals) const {
-  unsigned MaxReg = 0;
+  unsigned NumReg = 0;
   std::deque<const llvm::Value *> Unhandled;
   for (const auto &Interval : *Intervals) {
     Unhandled.push_back(Interval.first);
@@ -319,7 +319,7 @@ RegAlloc::linearScan(
       CurrentIt.setRegister(Reg);
     } else {
       // Register available for the first part of the interval
-      CurrentIt.setRegister(Reg);
+      //      CurrentIt.setRegister(Reg);
       llvm_unreachable("idk how to split");
     }
 
@@ -327,13 +327,13 @@ RegAlloc::linearScan(
     if (CurrentIt.getRegister() != -1) {
       Active.insert(Current);
       // Update max register
-      if (MaxReg < CurrentIt.getRegister()) {
-        MaxReg = CurrentIt.getRegister();
+      if (NumReg < CurrentIt.getRegister() + 1) {
+        NumReg = CurrentIt.getRegister() + 1;
       }
     }
   }
 
-  Ctx.setMaxReg(MaxReg);
+  Ctx.setNumReg(NumReg);
   auto Allocations =
       std::make_unique<std::unordered_map<const llvm::Value *, unsigned>>();
   for (const auto &Interval : *Intervals) {

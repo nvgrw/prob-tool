@@ -29,6 +29,8 @@ bool isLabelable(const Instruction *Inst) {
   case Instruction::Switch:
   case Instruction::Store:
   case Instruction::Ret:
+    // Temporary
+  case Instruction::Select:
     return true;
   default:
     return false;
@@ -66,10 +68,9 @@ void Analysis::readAndParse(const std::string &Filename) {
 
 void Analysis::prepareModule() {
   legacy::PassManager PM;
-  //  PM.add(createCFGSimplificationPass());
   PM.add(createConstantPropagationPass());
   PM.add(createPromoteMemoryToRegisterPass());
-  //  PM.add(createDemoteRegisterToMemoryPass());
+  PM.add(createCFGSimplificationPass());
   PM.add(createDeadCodeEliminationPass());
   PM.run(*Module);
 
@@ -103,9 +104,6 @@ void Analysis::prepareModule() {
       for (auto &I : BB)
         I.setName("");
   }
-
-  pt::RegAlloc RA(*Module, 10);
-  RA.allocate();
 }
 
 void Analysis::computeLabels() {
@@ -128,20 +126,33 @@ void Analysis::computeLabels() {
 }
 
 void Analysis::computeVariables() {
-  unsigned VariableIndex = 0;
-  for (auto &F : Module->functions()) {
-    for (auto &BB : F)
-      for (auto &I : BB) {
-        AllocaInst *AI = dyn_cast<AllocaInst>(&I);
-        if (!AI)
-          continue;
+  pt::RegAlloc RA(*Module);
+  auto Allocations = RA.allocate();
+  // TODO: work on multiple functions
 
-        // TODO: remove all the extra structures
-        Variables.push_back(
-            pt::IntSymVar(AI, APInt(64, 0, false), APInt(64, 2, false)));
-        ValToVarIndex[AI] = VariableIndex++;
-      }
+  auto &AllocPair = Allocations[Module->getFunction("main")];
+  ValToVarIndex = *std::get<0>(AllocPair);
+
+  unsigned NumVars = std::get<1>(AllocPair);
+  for (unsigned Index = 0; Index < NumVars; Index++) {
+    Variables.push_back(new pt::IntSymVar(
+        Module->getContext(), APInt(64, 0, false), APInt(64, 2, false)));
   }
+
+  //  unsigned VariableIndex = 0;
+  //  for (auto &F : Module->functions()) {
+  //    for (auto &BB : F)
+  //      for (auto &I : BB) {
+  //        AllocaInst *AI = dyn_cast<AllocaInst>(&I);
+  //        if (!AI)
+  //          continue;
+  //
+  //        // TODO: remove all the extra structures
+  //        Variables.push_back(
+  //            pt::IntSymVar(AI, APInt(64, 0, false), APInt(64, 2, false)));
+  //        ValToVarIndex[AI] = VariableIndex++;
+  //      }
+  //  }
 }
 
 void Analysis::translateTransforms() {
@@ -149,20 +160,21 @@ void Analysis::translateTransforms() {
     for (auto &BB : F) {
       // Evaluate all possible combinations of variables
       std::cout << "BB " << BB.getName().data() << std::endl;
-      pt::Evaluator Evaluator(Module->getDataLayout(), nullptr);
-      for (auto &V : Variables) {
-        Evaluator.addSymbolic(&V);
-      }
-      Evaluator.evaluate(BB);
+      if (!Variables.empty()) {
+        pt::Evaluator Evaluator(Module->getDataLayout(), nullptr, ValToVarIndex,
+                                Variables);
+        Evaluator.evaluate(BB);
 
-      for (auto &I : BB) {
-        if (!hasLabel(&I)) {
-          continue;
+        for (auto &I : BB) {
+          if (!hasLabel(&I)) {
+            continue;
+          }
+
+          translateInstruction(Evaluator, &I);
         }
-
-        translateInstruction(Evaluator, &I);
       }
     }
+    // TODO: TRANSLATE INSTRUCTIONS IN FUNCTIONS WITHOUT VARIABLES
   }
 }
 
@@ -182,7 +194,7 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
   case Instruction::Store: {
     const llvm::StoreInst *SI = llvm::cast<llvm::StoreInst>(Instruction);
     unsigned StoreToVarIndex = ValToVarIndex[SI->getPointerOperand()];
-    pt::IntSymVar const *Variable = &Variables[StoreToVarIndex];
+    pt::IntSymVar const *Variable = Variables[StoreToVarIndex];
 
     MatrixXd Matrix(NumStates, NumStates);
     Matrix.setZero();

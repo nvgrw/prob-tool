@@ -1,5 +1,6 @@
 #include "Evaluator.hpp"
 
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Utils/Evaluator.h>
@@ -8,23 +9,27 @@
 
 using namespace pt;
 
-void Evaluator::addSymbolic(IntSymVar *Var) { Symbolic.push_back(Var); }
+Evaluator::Evaluator(
+    const llvm::DataLayout &DL, const llvm::TargetLibraryInfo *TLI,
+    std::unordered_map<const llvm::Value *, unsigned int> IndexMap,
+    const std::vector<IntSymVar *> &Symbolic)
+    : DL(DL), TLI(TLI), IndexMap(IndexMap), Symbolic(Symbolic),
+      NumStates([&Symbolic]() {
+        unsigned V = 1;
+        for (pt::IntSymVar *SV : Symbolic) {
+          V *= SV->getRange();
+        }
+        return V;
+      }()) {
+  assert(!Symbolic.empty() && "Can't evaluate without variables");
+}
 
 void Evaluator::evaluate(llvm::BasicBlock &BB) {
   assert(!States &&
          "evaluate() may only be run once on the same Evaluator instance");
-
-  std::unordered_map<const llvm::Value *, unsigned> IndexMap;
-  unsigned NumVariables = 0;
-  NumStates = 1;
-  for (pt::IntSymVar *SV : Symbolic) {
-    IndexMap[SV->getAlloca()] = NumVariables++;
-    NumStates *= SV->getRange();
-  }
-
   States = new llvm::Evaluator *[NumStates];
-  std::vector<Evaluator::InstanceElem> Instance(NumVariables);
-  permuteVariablesAndExecute(Symbolic.begin(), BB, IndexMap, Instance);
+  std::vector<Evaluator::InstanceElem> Instance(Symbolic.size());
+  permuteVariablesAndExecute(Symbolic.begin(), BB, Instance);
 }
 
 llvm::Constant *Evaluator::getValue(const std::vector<StateAddressed> &Location,
@@ -65,16 +70,15 @@ Evaluator::getStateIndex(const std::vector<StateAddressed> &Location) const {
 }
 
 void Evaluator::permuteVariablesAndExecute(
-    SymbolicSetT::iterator VarIt, llvm::BasicBlock &BB,
-    std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
+    std::vector<IntSymVar *>::const_iterator VarIt, llvm::BasicBlock &BB,
     std::vector<InstanceElem> &Instance) {
   if (VarIt == Symbolic.end()) {
     return;
   }
 
   IntSymVar *Variable = *VarIt;
-  unsigned VariableIndex = IndexMap.at(Variable->getAlloca());
-  SymbolicSetT::iterator VarItNext = ++VarIt;
+  unsigned VariableIndex = std::distance(Symbolic.begin(), VarIt);
+  auto VarItNext = ++VarIt;
 
   unsigned ValueIndex = 0;
   for (llvm::ConstantInt *Value : *Variable) {
@@ -82,14 +86,14 @@ void Evaluator::permuteVariablesAndExecute(
         InstanceElem(ValueIndex, Variable->getRange(), Value);
 
     if (VarItNext != Symbolic.end()) { // not at bottom level of tree
-      permuteVariablesAndExecute(VarItNext, BB, IndexMap, Instance);
+      permuteVariablesAndExecute(VarItNext, BB, Instance);
       ValueIndex++;
       continue;
     }
 
     // Execute
     llvm::Evaluator *EV = new llvm::Evaluator(DL, TLI);
-    evaluateOnce(EV, BB, IndexMap, Instance);
+    assert(evaluateOnce(EV, BB, Instance) && "Evaluation failed");
 
     unsigned Index = 0;
     unsigned Multiplier = 1;
@@ -104,28 +108,58 @@ void Evaluator::permuteVariablesAndExecute(
   }
 }
 
-bool Evaluator::evaluateOnce(
-    llvm::Evaluator *EV, llvm::BasicBlock &BB,
-    std::unordered_map<const llvm::Value *, unsigned> const &IndexMap,
-    std::vector<InstanceElem> const &Instance) const {
+bool Evaluator::evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
+                             std::vector<InstanceElem> const &Instance) const {
   llvm::BasicBlock *NextBB = nullptr;
-  llvm::BasicBlock::iterator CurInst = BB.begin();
-  llvm::SmallVector<std::unique_ptr<llvm::GlobalVariable>, 10> AllocaTmps;
 
-  // TODO: only do this for variables that actually show up in this block
-  for (IntSymVar const *Variable : Symbolic) {
-    const llvm::AllocaInst *AI = Variable->getAlloca();
-    const llvm::Value *Value = llvm::cast<llvm::Value>(AI);
-    llvm::Constant *InstanceValue = Instance[IndexMap.at(Value)].Value;
+  struct ValueTmp {
+    std::unique_ptr<llvm::GlobalVariable> Global;
+    llvm::Instruction *Replaced;
+    llvm::LoadInst *Load = nullptr;
+  };
+  std::vector<ValueTmp> ValueTmps(Symbolic.size());
 
-    // Create a temporary variable used to refer to the concrete instance of
-    // the symbolic variable.
-    AllocaTmps.push_back(std::make_unique<llvm::GlobalVariable>(
-        AI->getAllocatedType(), false, llvm::GlobalValue::InternalLinkage,
-        InstanceValue, AI->getName(), llvm::GlobalValue::NotThreadLocal,
-        AI->getType()->getPointerAddressSpace()));
-    EV->setVal(const_cast<llvm::Value *>(Value), AllocaTmps.back().get());
+  // Builder that inserts before start
+  llvm::IRBuilder<> Builder(&*BB.begin());
+
+  // ** Initialize each variable that appears ** //
+  for (llvm::Instruction &Inst : BB) {
+    auto It = IndexMap.find(&Inst);
+    if (It == IndexMap.end()) // no variable
+      continue;
+
+    unsigned Reg = It->second;
+    if (ValueTmps[Reg].Global != nullptr) // already allocated elsewhere
+      continue;
+
+    llvm::Constant *InstanceValue = Instance[Reg].Value;
+    ValueTmps[Reg] = {.Global = std::make_unique<llvm::GlobalVariable>(
+                          Inst.getType(), false,
+                          llvm::GlobalValue::InternalLinkage, InstanceValue,
+                          Inst.getName(), llvm::GlobalValue::NotThreadLocal, 0),
+                      .Replaced = &Inst};
   }
 
-  return EV->EvaluateBlock(CurInst, NextBB);
+  // ** Replace all instructions with globals ** //
+  for (ValueTmp &VT : ValueTmps) {
+    if (VT.Global == nullptr)
+      continue;
+    VT.Load = Builder.CreateLoad(VT.Global.get());
+    VT.Replaced->replaceAllUsesWith(VT.Load);
+    VT.Replaced->removeFromParent();
+  }
+
+  llvm::BasicBlock::iterator CurInst = BB.begin();
+  bool Success = EV->EvaluateBlock(CurInst, NextBB);
+
+  // ** Revert changes to BasicBlock ** //
+  for (ValueTmp &VT : ValueTmps) {
+    if (VT.Global == nullptr)
+      continue;
+    VT.Replaced->insertAfter(VT.Load);
+    VT.Load->replaceAllUsesWith(VT.Replaced);
+    VT.Load->eraseFromParent();
+  }
+
+  return Success;
 }

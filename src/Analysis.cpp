@@ -29,8 +29,6 @@ bool isLabelable(const Instruction *Inst) {
   case Instruction::Switch:
   case Instruction::Store:
   case Instruction::Ret:
-    // Temporary
-  case Instruction::Select:
     return true;
   default:
     return false;
@@ -173,8 +171,8 @@ void Analysis::translateTransforms() {
           translateInstruction(Evaluator, &I);
         }
       }
+      // TODO: TRANSLATE INSTRUCTIONS IN FUNCTIONS WITHOUT VARIABLES
     }
-    // TODO: TRANSLATE INSTRUCTIONS IN FUNCTIONS WITHOUT VARIABLES
   }
 }
 

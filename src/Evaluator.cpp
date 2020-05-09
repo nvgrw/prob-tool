@@ -150,7 +150,7 @@ bool Evaluator::evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
   }
 
   llvm::BasicBlock::iterator CurInst = BB.begin();
-  bool Success = EV->EvaluateBlock(CurInst, NextBB);
+  bool Success = EV->EvaluateBlock(CurInst, NextBB, true);
 
   // ** Revert changes to BasicBlock ** //
   for (ValueTmp &VT : ValueTmps) {

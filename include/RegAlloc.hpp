@@ -98,7 +98,7 @@ public:
 
     assert(Ranges.size() % 2 == 0 && "Range size should be multiple of 2");
     for (unsigned I = 0; I < Ranges.size(); I += 2) {
-      if (Ranges[I] >= Value && Value <= Ranges[I + 1]) {
+      if (Ranges[I] <= Value && Value <= Ranges[I + 1]) {
         return true;
       }
     }

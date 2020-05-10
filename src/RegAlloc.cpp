@@ -196,7 +196,7 @@ RegAlloc::buildIntervals(AllocContext &Ctx, const llvm::Function &Func) const {
       }
 
       // Output operands (self)
-      if (Inst.getType() != llvm::Type::getVoidTy(Inst.getContext())) {
+      if (!Inst.getType()->isVoidTy()) {
         (*Intervals)[&Inst].setFrom(Ctx.getInstID(&Inst));
         Live.erase(&Inst);
       }

@@ -21,21 +21,6 @@
 using namespace llvm;
 using Eigen::MatrixXd;
 
-namespace {
-bool isLabelable(const Instruction *Inst) {
-  switch (Inst->getOpcode()) {
-  case Instruction::Br:
-  case Instruction::Choose:
-  case Instruction::Switch:
-  case Instruction::Store:
-  case Instruction::Ret:
-    return true;
-  default:
-    return false;
-  }
-}
-} // namespace
-
 Analysis::Analysis(const std::string &Filename) {
   readAndParse(Filename);
   prepareModule();
@@ -49,6 +34,35 @@ Analysis::Analysis(const std::string &Filename) {
 
 bool Analysis::hasLabel(const llvm::Value *Inst) const {
   return Labels.find(Inst) != Labels.end();
+}
+
+bool Analysis::isLabelable(const llvm::BasicBlock *BB,
+                           const llvm::Instruction *Inst) const {
+  // Trivial check first
+  switch (Inst->getOpcode()) {
+  case Instruction::Br:
+  case Instruction::Choose:
+  case Instruction::Switch:
+  case Instruction::Ret:
+    return true;
+  default:
+    break;
+  }
+
+  if (Inst->isUsedOutsideOfBlock(BB) || Inst->hasNUses(0)) {
+    // TODO: figure out a way to handle this and cases in which this breaks down
+    return false;
+  }
+
+  bool HasNonVoidUser = false;
+  for (const llvm::Value *User : Inst->users()) {
+    if (!User->getType()->isVoidTy()) {
+      HasNonVoidUser = true;
+      break;
+    }
+  }
+
+  return !HasNonVoidUser;
 }
 
 void Analysis::readAndParse(const std::string &Filename) {
@@ -72,31 +86,9 @@ void Analysis::prepareModule() {
   PM.add(createDeadCodeEliminationPass());
   PM.run(*Module);
 
-  // Remove calls, as calls are not supported.
-  // TODO(nvgrw): provide better error messages in cases where functions are not
-  // TODO(nvgrw): void functions. Could also improve by inlining first?
-  //  for (auto &F : Module->functions()) {
-  //    if (F.isDeclaration())
-  //      continue;
-  //
-  //    for (auto &BB : F) {
-  //      for (BasicBlock::iterator II = BB.begin(), E = BB.end(); II != E;) {
-  //        CallInst *CI = dyn_cast<CallInst>(II++);
-  //        if (!CI)
-  //          continue;
-  //
-  //        CI->eraseFromParent();
-  //      }
-  //    }
-  //  }
-
   // Remove the names from all values + declarations
   for (Module::iterator FI = Module->begin(), E = Module->end(); FI != E;) {
     Function &F = *FI++;
-    //    if (F.isDeclaration()) {
-    //      F.eraseFromParent();
-    //      continue;
-    //    }
 
     for (auto &BB : F)
       for (auto &I : BB)
@@ -109,7 +101,7 @@ void Analysis::computeLabels() {
     for (auto &BB : F) {
       bool BlockLabeled = false;
       for (auto &I : BB) {
-        if (!isLabelable(&I))
+        if (!isLabelable(&BB, &I))
           continue;
 
         if (!BlockLabeled) {
@@ -129,28 +121,14 @@ void Analysis::computeVariables() {
   // TODO: work on multiple functions
 
   auto &AllocPair = Allocations[Module->getFunction("main")];
-  ValToVarIndex = *std::get<0>(AllocPair);
+  unsigned NumAllocVars = std::get<1>(AllocPair);
+  // map alloc var to label var???
 
-  unsigned NumVars = std::get<1>(AllocPair);
+//  ValToVarIndex = *std::get<0>(AllocPair);
   for (unsigned Index = 0; Index < NumVars; Index++) {
     Variables.push_back(new pt::IntSymVar(
         Module->getContext(), APInt(64, 0, false), APInt(64, 2, false)));
   }
-
-  //  unsigned VariableIndex = 0;
-  //  for (auto &F : Module->functions()) {
-  //    for (auto &BB : F)
-  //      for (auto &I : BB) {
-  //        AllocaInst *AI = dyn_cast<AllocaInst>(&I);
-  //        if (!AI)
-  //          continue;
-  //
-  //        // TODO: remove all the extra structures
-  //        Variables.push_back(
-  //            pt::IntSymVar(AI, APInt(64, 0, false), APInt(64, 2, false)));
-  //        ValToVarIndex[AI] = VariableIndex++;
-  //      }
-  //  }
 }
 
 void Analysis::translateTransforms() {
@@ -189,22 +167,20 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
   unsigned FromLabel = Labels[Instruction];
 
   switch (Instruction->getOpcode()) {
-  case Instruction::Store: {
-    const llvm::StoreInst *SI = llvm::cast<llvm::StoreInst>(Instruction);
-    unsigned StoreToVarIndex = ValToVarIndex[SI->getPointerOperand()];
-    pt::IntSymVar const *Variable = Variables[StoreToVarIndex];
+  case Instruction::Br: {
+    const llvm::BranchInst *BI = llvm::cast<llvm::BranchInst>(Instruction);
+    if (BI->isUnconditional()) {
+      // todo: handle unconditional
+      break;
+    }
 
     MatrixXd Matrix(NumStates, NumStates);
     Matrix.setZero();
     for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
       const llvm::Constant *V = Evaluator.getValue(
-          StateIndex, const_cast<llvm::Value *>(SI->getValueOperand()));
-
-      unsigned ValueIndex = Variable->getIndexOfValue(V);
-      auto Location = Evaluator.getLocation(StateIndex);
-      (*Location)[StoreToVarIndex].Index = ValueIndex;
-      unsigned DestinationStateIndex = Evaluator.getStateIndex(*Location);
-      Matrix(StateIndex, DestinationStateIndex) = 1.0;
+          StateIndex, const_cast<llvm::Value *>(BI->getCondition()));
+      Matrix(StateIndex, StateIndex) = V->isZeroValue() ? 0.0 : 1.0;
+      // TODO: generate another matrix for !Condition + Edge transfer
     }
 
     std::cout << Matrix << std::endl;
@@ -227,24 +203,10 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
 
     std::cout << Matrix << std::endl;
   } break;
-  case Instruction::Br: {
-    const llvm::BranchInst *BI = llvm::cast<llvm::BranchInst>(Instruction);
-    if (BI->isUnconditional()) {
-      // todo: handle unconditional
-      break;
-    }
-
-    MatrixXd Matrix(NumStates, NumStates);
-    Matrix.setZero();
-    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
-      const llvm::Constant *V = Evaluator.getValue(
-          StateIndex, const_cast<llvm::Value *>(BI->getCondition()));
-      Matrix(StateIndex, StateIndex) = V->isZeroValue() ? 0.0 : 1.0;
-      // TODO: generate another matrix for !Condition + Edge transfer
-    }
-
-    std::cout << Matrix << std::endl;
-  } break;
+  case Instruction::Switch:
+    llvm_unreachable("Switch not implemented");
+  case Instruction::Ret:
+    llvm_unreachable("Ret not implemented");
     //  case Instruction::Select: {
     //    const llvm::SelectInst *SI =
     //    llvm::cast<llvm::SelectInst>(Instruction);
@@ -258,8 +220,29 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
     //  case Instruction::Switch:
     //  case Instruction::Select:
     //  case Instruction::Ret:
-  default:
-    llvm_unreachable("Unhandled labeled instruction type");
+  case Instruction::PHI:
+    // TODO: handle phis separately
+    break;
+  default: {
+    unsigned StoreToVarIndex = ValToVarIndex[Instruction];
+    pt::IntSymVar const *Variable = Variables[StoreToVarIndex];
+
+    MatrixXd Matrix(NumStates, NumStates);
+    Matrix.setZero();
+    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+      const llvm::Constant *V = Evaluator.getValue(
+          StateIndex, const_cast<llvm::Instruction *>(Instruction));
+      // todo: remove const cast if it works
+
+      unsigned ValueIndex = Variable->getIndexOfValue(V);
+      auto Location = Evaluator.getLocation(StateIndex);
+      (*Location)[StoreToVarIndex].Index = ValueIndex;
+      unsigned DestinationStateIndex = Evaluator.getStateIndex(*Location);
+      Matrix(StateIndex, DestinationStateIndex) = 1.0;
+    }
+
+    std::cout << Matrix << std::endl;
+  } break;
   }
 }
 
@@ -269,6 +252,13 @@ void Analysis::printLabeled() {
     for (auto &BB : F) {
       std::printf("%s:\n", BB.getName().data());
       for (auto &I : BB) {
+        auto VarIndexIt = ValToVarIndex.find(&I);
+        if (VarIndexIt != ValToVarIndex.end()) {
+          std::printf("%02u ", VarIndexIt->second);
+        } else {
+          std::printf("XX ");
+        }
+
         if (hasLabel(&I)) {
           std::printf("%02u | ", Labels[&I]);
         } else {

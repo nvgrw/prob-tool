@@ -235,8 +235,8 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
 
       unsigned ValueIndex = Variable->getIndexOfValue(V);
       auto Location = Evaluator.getLocation(StateIndex);
-      (*Location)[StoreToVarIndex].Index = ValueIndex;
-      unsigned DestinationStateIndex = Evaluator.getStateIndex(*Location);
+      Location[StoreToVarIndex].Index = ValueIndex;
+      unsigned DestinationStateIndex = Evaluator.getStateIndex(Location);
       StateMatrix(StateIndex, DestinationStateIndex) = 1.0;
     }
 

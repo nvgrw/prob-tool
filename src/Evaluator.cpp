@@ -39,23 +39,22 @@ llvm::Constant *Evaluator::getValue(const std::vector<StateAddressed> &Location,
   return getValue(Index, V);
 }
 
-std::unique_ptr<std::vector<Evaluator::StateAddressed>>
+std::vector<Evaluator::StateAddressed>
 Evaluator::getLocation(unsigned int StateIndex) const {
-  auto Location =
-      std::make_unique<std::vector<Evaluator::StateAddressed>>(Symbolic.size());
+  std::vector<Evaluator::StateAddressed> Location(Symbolic.size());
   for (int I = Symbolic.size() - 1; I >= 0; I--) {
     unsigned Range = Symbolic[I]->getRange();
-    (*Location)[I].Range = Range;
+    Location[I].Range = Range;
     if (StateIndex == 0) {
       continue;
     }
     unsigned Index = StateIndex % Range;
-    (*Location)[I].Index = Index;
+    Location[I].Index = Index;
     StateIndex -= Index;
     StateIndex /= Range;
   }
 
-  return std::move(Location);
+  return Location;
 }
 
 unsigned

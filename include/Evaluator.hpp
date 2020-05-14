@@ -183,8 +183,7 @@ public:
   }
   inline unsigned getNumStates() const { return NumStates; }
 
-  std::unique_ptr<std::vector<StateAddressed>>
-  getLocation(unsigned StateIndex) const;
+  std::vector<StateAddressed> getLocation(unsigned StateIndex) const;
   unsigned getStateIndex(std::vector<StateAddressed> const &Location) const;
 
 private:

@@ -1,20 +1,18 @@
 
 #include <iostream>
 #include <memory>
-#include <string>
+#include <numeric>
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/MemoryBuffer.h>
-#include <llvm/Transforms/Scalar.h>
-#include <llvm/Transforms/Utils.h>
 
 #include <Eigen/Dense>
-#include <llvm/IR/Intrinsics.h>
 #include <unsupported/Eigen/KroneckerProduct>
 
 #include "Analysis.hpp"
@@ -31,7 +29,7 @@ Analysis::Analysis(const std::string &Filename) {
 
   printLabeled();
 
-  translateTransforms();
+  printMatrix(translateTransforms());
 }
 
 bool Analysis::hasLabel(const llvm::Value *Inst) const {
@@ -122,11 +120,13 @@ void Analysis::computeVariables() {
   }
 }
 
-void Analysis::translateTransforms() {
+std::vector<std::vector<Eigen::MatrixXd>> Analysis::translateTransforms() {
+  std::vector<std::vector<MatrixXd>> Matrices;
+
+  // TODO: deal with multiple functions (currently assuming just 1)
   for (auto &F : Module->functions()) {
     for (auto &BB : F) {
       // Evaluate all possible combinations of variables
-      std::cout << "BB " << BB.getName().data() << std::endl;
       if (!Variables.empty()) {
         pt::Evaluator Evaluator(Module->getDataLayout(), nullptr, ValToVarIndex,
                                 Variables);
@@ -137,28 +137,24 @@ void Analysis::translateTransforms() {
             continue;
           }
 
-          translateInstruction(Evaluator, &I);
+          translateInstruction(Evaluator, Matrices, &I);
         }
       }
       // TODO: TRANSLATE INSTRUCTIONS IN FUNCTIONS WITHOUT VARIABLES
     }
   }
+
+  return Matrices;
 }
 
-void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
-                                    llvm::Instruction const *Instruction) {
-  {
-    std::string OutString;
-    llvm::raw_string_ostream OutStream(OutString);
-    Instruction->print(OutStream);
-    std::printf("TR: (L%u) %s\n", Labels[Instruction], OutString.c_str());
-  }
-
+void Analysis::translateInstruction(
+    pt::Evaluator const &Evaluator,
+    std::vector<std::vector<Eigen::MatrixXd>> &Matrices,
+    llvm::Instruction const *Instruction) {
   unsigned NumStates = Evaluator.getNumStates();
   unsigned FromLabel = Labels[Instruction];
   MatrixXd StateIdentity(NumStates, NumStates);
   StateIdentity.setIdentity();
-  std::vector<std::vector<MatrixXd>> Matrices;
 
   switch (Instruction->getOpcode()) {
   case Instruction::Br: {
@@ -167,7 +163,6 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
       MatrixXd TransferMatrix(MaxLabels, MaxLabels);
       TransferMatrix.setZero();
       TransferMatrix(FromLabel, BasicBlockLabels[BI->getSuccessor(0)]) = 1.0;
-      std::cout<<TransferMatrix <<std::endl;
       Matrices.push_back({StateIdentity, TransferMatrix});
       break;
     }
@@ -252,20 +247,47 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
 }
 
 void Analysis::printLabeled() {
+  std::cerr << "===== Labeled Program =====" << std::endl;
   for (auto &F : Module->functions()) {
-    std::printf("(%s)\n", F.getName().data());
+    fprintf(stderr, "(%s)\n", F.getName().data());
     for (auto &BB : F) {
-      std::printf("%s:\n", BB.getName().data());
+      fprintf(stderr, "%s:\n", BB.getName().data());
       for (auto &I : BB) {
         if (hasLabel(&I)) {
-          std::printf("%02u | ", Labels[&I]);
+          fprintf(stderr, "%02u | ", Labels[&I]);
         } else {
-          std::printf("   | ");
+          fprintf(stderr, "   | ");
         }
-        std::cout.flush();
-        I.print(llvm::outs());
-        printf("\n");
+        std::cerr.flush();
+        I.print(llvm::errs());
+        fprintf(stderr, "\n");
       }
     }
   }
+}
+
+void Analysis::printMatrix(
+    std::vector<std::vector<Eigen::MatrixXd>> const &Matrices) const {
+  MatrixXd Identity1(1, 1);
+  Identity1.setIdentity();
+
+  MatrixXd *Result = nullptr;
+  for (const std::vector<MatrixXd> &Kroneckerize : Matrices) {
+    MatrixXd V = std::accumulate(
+        Kroneckerize.begin(), Kroneckerize.end(), Identity1,
+        [&](const MatrixXd &Acc, const MatrixXd &Val) -> MatrixXd {
+          return Eigen::kroneckerProduct(Acc, Val).eval();
+        });
+    if (Result == nullptr) {
+      Result = new MatrixXd(V);
+    } else {
+      *Result = *Result + V;
+    }
+  }
+
+  assert(Result && "No matrix generated");
+
+  std::cerr << "===== DTMC Generator Matrix =====" << std::endl;
+  std::cout << *Result << std::endl;
+  delete Result;
 }

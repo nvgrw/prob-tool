@@ -10,6 +10,8 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 
+#include <Eigen/Dense>
+
 #include "Evaluator.hpp"
 
 namespace llvm {
@@ -48,11 +50,14 @@ private:
   void prepareModule();
   void computeLabels();
   void computeVariables();
-  void translateTransforms();
+  std::vector<std::vector<Eigen::MatrixXd>> translateTransforms();
   void translateInstruction(pt::Evaluator const &Evaluator,
+                            std::vector<std::vector<Eigen::MatrixXd>> &Matrices,
                             llvm::Instruction const *Instruction);
 
   void printLabeled();
+  void
+  printMatrix(std::vector<std::vector<Eigen::MatrixXd>> const &Matrices) const;
 };
 
 #endif // PT_ANALYSIS_HPP

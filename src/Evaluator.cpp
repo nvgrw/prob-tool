@@ -112,54 +112,25 @@ bool Evaluator::evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
                              std::vector<InstanceElem> const &Instance) const {
   llvm::BasicBlock *NextBB = nullptr;
 
-  struct ValueTmp {
-    std::unique_ptr<llvm::GlobalVariable> Global;
-    llvm::Instruction *Replaced;
-    llvm::LoadInst *Load = nullptr;
-  };
-  std::vector<ValueTmp> ValueTmps(Symbolic.size());
+  std::vector<std::unique_ptr<llvm::GlobalVariable>> ValueTmps(Symbolic.size());
 
   // Builder that inserts before start
   llvm::IRBuilder<> Builder(&*BB.begin());
 
   // ** Initialize each variable that appears ** //
-  for (llvm::Instruction &Inst : BB) {
-    auto It = IndexMap.find(&Inst);
-    if (It == IndexMap.end()) // no variable
-      continue;
-
-    unsigned Reg = It->second;
-    if (ValueTmps[Reg].Global != nullptr) // already allocated elsewhere
-      continue;
+  unsigned Reg = 0;
+  for (IntSymVar *Variable : Symbolic) {
+    auto *Alloca = Variable->getAlloca();
 
     llvm::Constant *InstanceValue = Instance[Reg].Value;
-    ValueTmps[Reg] = {.Global = std::make_unique<llvm::GlobalVariable>(
-                          Inst.getType(), false,
-                          llvm::GlobalValue::InternalLinkage, InstanceValue,
-                          Inst.getName(), llvm::GlobalValue::NotThreadLocal, 0),
-                      .Replaced = &Inst};
-  }
-
-  // ** Replace all instructions with globals ** //
-  for (ValueTmp &VT : ValueTmps) {
-    if (VT.Global == nullptr)
-      continue;
-    VT.Load = Builder.CreateLoad(VT.Global.get());
-    VT.Replaced->replaceAllUsesWith(VT.Load);
-    VT.Replaced->removeFromParent();
+    ValueTmps[Reg] = std::make_unique<llvm::GlobalVariable>(
+        Alloca->getAllocatedType(), false, llvm::GlobalValue::InternalLinkage,
+        InstanceValue, Alloca->getName(), llvm::GlobalValue::NotThreadLocal,
+        Alloca->getType()->getPointerAddressSpace());
+    EV->setVal(Alloca, ValueTmps[Reg].get());
+    Reg++;
   }
 
   llvm::BasicBlock::iterator CurInst = BB.begin();
-  bool Success = EV->EvaluateBlock(CurInst, NextBB, true);
-
-  // ** Revert changes to BasicBlock ** //
-  for (ValueTmp &VT : ValueTmps) {
-    if (VT.Global == nullptr)
-      continue;
-    VT.Replaced->insertAfter(VT.Load);
-    VT.Load->replaceAllUsesWith(VT.Replaced);
-    VT.Load->eraseFromParent();
-  }
-
-  return Success;
+  return EV->EvaluateBlock(CurInst, NextBB, true);
 }

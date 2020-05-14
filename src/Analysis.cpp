@@ -4,6 +4,7 @@
 #include <string>
 
 #include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -13,10 +14,11 @@
 #include <llvm/Transforms/Utils.h>
 
 #include <Eigen/Dense>
+#include <llvm/IR/Intrinsics.h>
+#include <unsupported/Eigen/KroneckerProduct>
 
 #include "Analysis.hpp"
 #include "Evaluator.hpp"
-#include "RegAlloc.hpp"
 
 using namespace llvm;
 using Eigen::MatrixXd;
@@ -38,31 +40,16 @@ bool Analysis::hasLabel(const llvm::Value *Inst) const {
 
 bool Analysis::isLabelable(const llvm::BasicBlock *BB,
                            const llvm::Instruction *Inst) const {
-  // Trivial check first
   switch (Inst->getOpcode()) {
   case Instruction::Br:
   case Instruction::Choose:
   case Instruction::Switch:
   case Instruction::Ret:
+  case Instruction::Store:
     return true;
   default:
-    break;
-  }
-
-  if (Inst->isUsedOutsideOfBlock(BB) || Inst->hasNUses(0)) {
-    // TODO: figure out a way to handle this and cases in which this breaks down
     return false;
   }
-
-  bool HasNonVoidUser = false;
-  for (const llvm::Value *User : Inst->users()) {
-    if (!User->getType()->isVoidTy()) {
-      HasNonVoidUser = true;
-      break;
-    }
-  }
-
-  return !HasNonVoidUser;
 }
 
 void Analysis::readAndParse(const std::string &Filename) {
@@ -79,12 +66,9 @@ void Analysis::readAndParse(const std::string &Filename) {
 }
 
 void Analysis::prepareModule() {
-  legacy::PassManager PM;
-  PM.add(createConstantPropagationPass());
-  PM.add(createPromoteMemoryToRegisterPass());
-  PM.add(createCFGSimplificationPass());
-  PM.add(createDeadCodeEliminationPass());
-  PM.run(*Module);
+  for (const auto *DU : Module->debug_compile_units()) {
+    assert(!DU->isOptimized() && "Analysis requires unoptimized module.");
+  }
 
   // Remove the names from all values + declarations
   for (Module::iterator FI = Module->begin(), E = Module->end(); FI != E;) {
@@ -116,18 +100,25 @@ void Analysis::computeLabels() {
 }
 
 void Analysis::computeVariables() {
-  pt::RegAlloc RA(*Module);
-  auto Allocations = RA.allocate();
-  // TODO: work on multiple functions
+  unsigned VariableIndex = 0;
+  // TODO: better handling for variables across functions
+  for (const auto &F : *Module) {
+    for (const auto &BB : F) {
+      for (const auto &I : BB) {
+        const CallInst *CI = dyn_cast<CallInst>(&I);
+        if (!CI || CI->getIntrinsicID() != Intrinsic::dbg_declare)
+          continue;
 
-  auto &AllocPair = Allocations[Module->getFunction("main")];
-  unsigned NumAllocVars = std::get<1>(AllocPair);
-  // map alloc var to label var???
-
-//  ValToVarIndex = *std::get<0>(AllocPair);
-  for (unsigned Index = 0; Index < NumVars; Index++) {
-    Variables.push_back(new pt::IntSymVar(
-        Module->getContext(), APInt(64, 0, false), APInt(64, 2, false)));
+        // TODO: obtain range from user or metadata
+        Variables.push_back(new pt::IntSymVar(const_cast<CallInst *>(CI),
+                                              APInt(64, 0, false),
+                                              APInt(64, 2, false)));
+        ValToVarIndex[cast<ValueAsMetadata>(
+                          cast<MetadataAsValue>(CI->getOperand(0))
+                              ->getMetadata())
+                          ->getValue()] = VariableIndex++;
+      }
+    }
   }
 }
 
@@ -165,25 +156,43 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
 
   unsigned NumStates = Evaluator.getNumStates();
   unsigned FromLabel = Labels[Instruction];
+  MatrixXd StateIdentity(NumStates, NumStates);
+  StateIdentity.setIdentity();
+  std::vector<std::vector<MatrixXd>> Matrices;
 
   switch (Instruction->getOpcode()) {
   case Instruction::Br: {
     const llvm::BranchInst *BI = llvm::cast<llvm::BranchInst>(Instruction);
     if (BI->isUnconditional()) {
-      // todo: handle unconditional
+      MatrixXd TransferMatrix(MaxLabels, MaxLabels);
+      TransferMatrix.setZero();
+      TransferMatrix(FromLabel, BasicBlockLabels[BI->getSuccessor(0)]) = 1.0;
+      std::cout<<TransferMatrix <<std::endl;
+      Matrices.push_back({StateIdentity, TransferMatrix});
       break;
     }
 
-    MatrixXd Matrix(NumStates, NumStates);
-    Matrix.setZero();
+    MatrixXd TrueStateMatrix(NumStates, NumStates),
+        FalseStateMatrix(NumStates, NumStates);
+    TrueStateMatrix.setZero();
+    FalseStateMatrix.setZero();
     for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
       const llvm::Constant *V = Evaluator.getValue(
           StateIndex, const_cast<llvm::Value *>(BI->getCondition()));
-      Matrix(StateIndex, StateIndex) = V->isZeroValue() ? 0.0 : 1.0;
-      // TODO: generate another matrix for !Condition + Edge transfer
+      TrueStateMatrix(StateIndex, StateIndex) = V->isZeroValue() ? 0.0 : 1.0;
+      FalseStateMatrix(StateIndex, StateIndex) = !V->isZeroValue() ? 0.0 : 1.0;
     }
 
-    std::cout << Matrix << std::endl;
+    MatrixXd TrueTransferMatrix(MaxLabels, MaxLabels),
+        FalseTransferMatrix(MaxLabels, MaxLabels);
+    TrueTransferMatrix.setZero();
+    FalseTransferMatrix.setZero();
+
+    TrueTransferMatrix(FromLabel, BasicBlockLabels[BI->getSuccessor(0)]) = 1.0;
+    FalseTransferMatrix(FromLabel, BasicBlockLabels[BI->getSuccessor(1)]) = 1.0;
+
+    Matrices.push_back({TrueStateMatrix, TrueTransferMatrix});
+    Matrices.push_back({FalseStateMatrix, FalseTransferMatrix});
   } break;
   case Instruction::Choose: {
     const llvm::ChooseInst *CI = llvm::cast<llvm::ChooseInst>(Instruction);
@@ -193,56 +202,52 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
       WeightSum += Choice.getChoiceWeight()->getZExtValue();
     }
 
-    MatrixXd Matrix(MaxLabels, MaxLabels);
-    Matrix.setZero();
+    MatrixXd TransferMatrix(MaxLabels, MaxLabels);
+    TransferMatrix.setZero();
     for (auto &Choice : CI->choices()) {
       unsigned ToLabel = BasicBlockLabels[Choice.getChoiceSuccessor()];
-      Matrix(FromLabel, ToLabel) =
+      TransferMatrix(FromLabel, ToLabel) =
           Choice.getChoiceWeight()->getZExtValue() / (double)WeightSum;
     }
 
-    std::cout << Matrix << std::endl;
+    Matrices.push_back({StateIdentity, TransferMatrix});
   } break;
   case Instruction::Switch:
     llvm_unreachable("Switch not implemented");
-  case Instruction::Ret:
-    llvm_unreachable("Ret not implemented");
-    //  case Instruction::Select: {
-    //    const llvm::SelectInst *SI =
-    //    llvm::cast<llvm::SelectInst>(Instruction);
-    //
-    //    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
-    //      const llvm::Constant *V = Evaluator.getValue(
-    //          StateIndex, const_cast<llvm::Value *>(SI->getCondition()));
-    //      V->dump();
-    //    }
-    //  } break;
-    //  case Instruction::Switch:
-    //  case Instruction::Select:
-    //  case Instruction::Ret:
-  case Instruction::PHI:
-    // TODO: handle phis separately
-    break;
-  default: {
-    unsigned StoreToVarIndex = ValToVarIndex[Instruction];
+  case Instruction::Ret: {
+    MatrixXd TransferMatrix(MaxLabels, MaxLabels);
+    TransferMatrix.setZero();
+    TransferMatrix(FromLabel, FromLabel) = 1.0;
+
+    Matrices.push_back({StateIdentity, TransferMatrix});
+  } break;
+  case Instruction::Store: {
+    const auto *Store = cast<llvm::StoreInst>(Instruction);
+    unsigned StoreToVarIndex = ValToVarIndex[Store->getPointerOperand()];
     pt::IntSymVar const *Variable = Variables[StoreToVarIndex];
 
-    MatrixXd Matrix(NumStates, NumStates);
-    Matrix.setZero();
+    MatrixXd StateMatrix(NumStates, NumStates);
+    StateMatrix.setZero();
     for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
       const llvm::Constant *V = Evaluator.getValue(
-          StateIndex, const_cast<llvm::Instruction *>(Instruction));
+          StateIndex, const_cast<llvm::Value *>(Store->getValueOperand()));
       // todo: remove const cast if it works
 
       unsigned ValueIndex = Variable->getIndexOfValue(V);
       auto Location = Evaluator.getLocation(StateIndex);
       (*Location)[StoreToVarIndex].Index = ValueIndex;
       unsigned DestinationStateIndex = Evaluator.getStateIndex(*Location);
-      Matrix(StateIndex, DestinationStateIndex) = 1.0;
+      StateMatrix(StateIndex, DestinationStateIndex) = 1.0;
     }
 
-    std::cout << Matrix << std::endl;
+    MatrixXd TransferMatrix(MaxLabels, MaxLabels);
+    TransferMatrix.setZero();
+    TransferMatrix(FromLabel, FromLabel + 1) = 1.0;
+
+    Matrices.push_back({StateMatrix, TransferMatrix});
   } break;
+  default:
+    llvm_unreachable("Unsupported labeled instruction");
   }
 }
 
@@ -252,13 +257,6 @@ void Analysis::printLabeled() {
     for (auto &BB : F) {
       std::printf("%s:\n", BB.getName().data());
       for (auto &I : BB) {
-        auto VarIndexIt = ValToVarIndex.find(&I);
-        if (VarIndexIt != ValToVarIndex.end()) {
-          std::printf("%02u ", VarIndexIt->second);
-        } else {
-          std::printf("XX ");
-        }
-
         if (hasLabel(&I)) {
           std::printf("%02u | ", Labels[&I]);
         } else {

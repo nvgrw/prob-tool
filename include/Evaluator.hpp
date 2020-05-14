@@ -28,13 +28,23 @@ template <class SymVarT, class ValueT,
               std::is_base_of<llvm::Constant, ValueT>::value>::type>
 class SymVar {
 protected:
-  llvm::LLVMContext &Context;
+  llvm::CallInst *Decl;
 
 public:
   SymVar() = delete;
 
+  llvm::CallInst *getDecl() const { return Decl; }
+
+  llvm::AllocaInst *getAlloca() const {
+    return llvm::cast<llvm::AllocaInst>(
+        llvm::cast<llvm::ValueAsMetadata>(
+            llvm::cast<llvm::MetadataAsValue>(Decl->getOperand(0))
+                ->getMetadata())
+            ->getValue());
+  }
+
 protected:
-  SymVar(llvm::LLVMContext &Context) : Context(Context) {}
+  SymVar(llvm::CallInst *Decl) : Decl(Decl) {}
 
 private:
   class Iterator : public std::iterator<std::forward_iterator_tag, ValueT> {
@@ -80,8 +90,8 @@ private:
   const llvm::APInt Max;
 
 public:
-  IntSymVar(llvm::LLVMContext &Context, llvm::APInt Min, llvm::APInt Max)
-      : SymVar(Context), Min(Min), Max(Max) {
+  IntSymVar(llvm::CallInst *Decl, llvm::APInt Min, llvm::APInt Max)
+      : SymVar(Decl), Min(Min), Max(Max) {
     assert(Min.getBitWidth() == Max.getBitWidth() &&
            "Bitwidth of Min and Max must be the same.");
   }
@@ -104,7 +114,7 @@ public:
   unsigned int getBitWidth() const { return Min.getBitWidth(); }
 
   iterator begin() {
-    return iterator(this, llvm::ConstantInt::get(Context, Min));
+    return iterator(this, llvm::ConstantInt::get(Decl->getContext(), Min));
   }
   iterator end() { return iterator(this, nullptr); }
 

@@ -26,8 +26,8 @@ int main(int Argc, char **Argv) {
     report_fatal_error(std::move(Error));
   }
 
-  Analysis A(ModuleOrError.get());
-  A.printLabeled();
+  pt::Analysis A(ModuleOrError.get());
+  A.dumpLabeled();
   std::cout << A.run() << std::endl;
   return EXIT_SUCCESS;
 }

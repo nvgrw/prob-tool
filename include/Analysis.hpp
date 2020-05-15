@@ -14,9 +14,9 @@ class Value;
 
 namespace pt {
 class Evaluator;
-}
+} // namespace pt
 
-// todo: put in pt namespace
+namespace pt {
 class Analysis {
 private:
   llvm::LLVMContext Context;
@@ -38,7 +38,7 @@ public:
   }
 
   Eigen::MatrixXd run();
-  void printLabeled();
+  void dumpLabeled();
 
 private:
   bool hasLabel(const llvm::Value *Inst) const;
@@ -56,5 +56,6 @@ private:
   Eigen::MatrixXd computeMatrix(
       std::vector<std::vector<Eigen::MatrixXd>> const &Matrices) const;
 };
+} // namespace pt
 
 #endif // PT_ANALYSIS_HPP

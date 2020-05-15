@@ -15,18 +15,19 @@
 using namespace llvm;
 using Eigen::MatrixXd;
 
+namespace pt {
 Analysis::Analysis(std::unique_ptr<llvm::Module> const &Module)
     : Module(Module) {
   prepareModule();
   computeLabels();
   computeVariables();
 
-  printLabeled();
+  dumpLabeled();
 }
 
 Eigen::MatrixXd Analysis::run() { return computeMatrix(translateTransforms()); }
 
-void Analysis::printLabeled() {
+void Analysis::dumpLabeled() {
   std::cerr << "===== Labeled Program =====" << std::endl;
   for (auto &F : Module->functions()) {
     fprintf(stderr, "(%s)\n", F.getName().data());
@@ -271,3 +272,4 @@ MatrixXd Analysis::computeMatrix(
   assert(ResultSet && "No matrix generated");
   return Result;
 }
+} // namespace pt

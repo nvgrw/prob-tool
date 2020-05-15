@@ -6,16 +6,17 @@
 #include <unordered_map>
 #include <vector>
 
-#include <llvm/ADT/APInt.h>
-#include <llvm/ADT/SmallPtrSet.h>
-#include <llvm/IR/Constants.h>
+#include <llvm/IR/Constant.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Transforms/Utils/Evaluator.h>
 
 namespace llvm {
 class BasicBlock;
-class Value;
+class CallInst;
 class TargetLibraryInfo;
+class Value;
+class ValueAsMetadata;
+class MetadataAsValue;
 } // namespace llvm
 
 namespace pt {

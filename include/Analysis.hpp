@@ -1,14 +1,7 @@
 #ifndef PT_ANALYSIS_HPP
 #define PT_ANALYSIS_HPP
 
-#include <map>
-#include <memory>
-#include <string>
 #include <unordered_map>
-
-#include <llvm/ADT/SmallVector.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
 
 #include <Eigen/Dense>
 
@@ -19,11 +12,15 @@ class AllocaInst;
 class Value;
 } // namespace llvm
 
+namespace pt {
+class Evaluator;
+}
+
 // todo: put in pt namespace
 class Analysis {
 private:
   llvm::LLVMContext Context;
-  std::unique_ptr<llvm::Module> Module;
+  const std::unique_ptr<llvm::Module> &Module;
 
   std::vector<pt::IntSymVar *> Variables;
   std::unordered_map<const llvm::Value *, unsigned> ValToVarIndex;
@@ -33,12 +30,15 @@ private:
   unsigned MaxLabels = 0;
 
 public:
-  Analysis(const std::string &Filename);
+  Analysis(std::unique_ptr<llvm::Module> const &Module);
   ~Analysis() {
     for (auto *Variable : Variables) {
       delete Variable;
     }
   }
+
+  Eigen::MatrixXd run();
+  void printLabeled();
 
 private:
   bool hasLabel(const llvm::Value *Inst) const;
@@ -46,7 +46,6 @@ private:
                    const llvm::Instruction *Inst) const;
 
 private:
-  void readAndParse(const std::string &Filename);
   void prepareModule();
   void computeLabels();
   void computeVariables();
@@ -54,10 +53,8 @@ private:
   void translateInstruction(pt::Evaluator const &Evaluator,
                             std::vector<std::vector<Eigen::MatrixXd>> &Matrices,
                             llvm::Instruction const *Instruction);
-
-  void printLabeled();
-  void
-  printMatrix(std::vector<std::vector<Eigen::MatrixXd>> const &Matrices) const;
+  Eigen::MatrixXd computeMatrix(
+      std::vector<std::vector<Eigen::MatrixXd>> const &Matrices) const;
 };
 
 #endif // PT_ANALYSIS_HPP

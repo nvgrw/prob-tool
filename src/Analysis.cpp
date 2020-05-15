@@ -3,33 +3,47 @@
 #include <memory>
 #include <numeric>
 
-#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/DebugInfoMetadata.h>
-#include <llvm/IR/Instruction.h>
-#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
-#include <llvm/IR/LegacyPassManager.h>
-#include <llvm/IR/Value.h>
-#include <llvm/Support/MemoryBuffer.h>
+#include <llvm/IR/Module.h>
 
 #include <Eigen/Dense>
 #include <unsupported/Eigen/KroneckerProduct>
 
 #include "Analysis.hpp"
-#include "Evaluator.hpp"
 
 using namespace llvm;
 using Eigen::MatrixXd;
 
-Analysis::Analysis(const std::string &Filename) {
-  readAndParse(Filename);
+Analysis::Analysis(std::unique_ptr<llvm::Module> const &Module)
+    : Module(Module) {
   prepareModule();
   computeLabels();
   computeVariables();
 
   printLabeled();
+}
 
-  printMatrix(translateTransforms());
+Eigen::MatrixXd Analysis::run() { return computeMatrix(translateTransforms()); }
+
+void Analysis::printLabeled() {
+  std::cerr << "===== Labeled Program =====" << std::endl;
+  for (auto &F : Module->functions()) {
+    fprintf(stderr, "(%s)\n", F.getName().data());
+    for (auto &BB : F) {
+      fprintf(stderr, "%s:\n", BB.getName().data());
+      for (auto &I : BB) {
+        if (hasLabel(&I)) {
+          fprintf(stderr, "%02u | ", Labels[&I]);
+        } else {
+          fprintf(stderr, "   | ");
+        }
+        std::cerr.flush();
+        I.print(llvm::errs());
+        fprintf(stderr, "\n");
+      }
+    }
+  }
 }
 
 bool Analysis::hasLabel(const llvm::Value *Inst) const {
@@ -48,19 +62,6 @@ bool Analysis::isLabelable(const llvm::BasicBlock *BB,
   default:
     return false;
   }
-}
-
-void Analysis::readAndParse(const std::string &Filename) {
-  auto BufferOrError = MemoryBuffer::getFile(Filename);
-  if (std::error_code Ec = BufferOrError.getError()) {
-    report_fatal_error(errorCodeToError(Ec));
-  }
-  MemoryBufferRef Buffer(*BufferOrError.get());
-  auto ModuleOrError = parseBitcodeFile(Buffer, Context);
-  if (Error Error = ModuleOrError.takeError()) {
-    report_fatal_error(std::move(Error));
-  }
-  this->Module = std::move(ModuleOrError.get());
 }
 
 void Analysis::prepareModule() {
@@ -246,48 +247,27 @@ void Analysis::translateInstruction(
   }
 }
 
-void Analysis::printLabeled() {
-  std::cerr << "===== Labeled Program =====" << std::endl;
-  for (auto &F : Module->functions()) {
-    fprintf(stderr, "(%s)\n", F.getName().data());
-    for (auto &BB : F) {
-      fprintf(stderr, "%s:\n", BB.getName().data());
-      for (auto &I : BB) {
-        if (hasLabel(&I)) {
-          fprintf(stderr, "%02u | ", Labels[&I]);
-        } else {
-          fprintf(stderr, "   | ");
-        }
-        std::cerr.flush();
-        I.print(llvm::errs());
-        fprintf(stderr, "\n");
-      }
-    }
-  }
-}
-
-void Analysis::printMatrix(
+MatrixXd Analysis::computeMatrix(
     std::vector<std::vector<Eigen::MatrixXd>> const &Matrices) const {
   MatrixXd Identity1(1, 1);
   Identity1.setIdentity();
 
-  MatrixXd *Result = nullptr;
+  MatrixXd Result;
+  bool ResultSet = false;
   for (const std::vector<MatrixXd> &Kroneckerize : Matrices) {
     MatrixXd V = std::accumulate(
         Kroneckerize.begin(), Kroneckerize.end(), Identity1,
         [&](const MatrixXd &Acc, const MatrixXd &Val) -> MatrixXd {
           return Eigen::kroneckerProduct(Acc, Val).eval();
         });
-    if (Result == nullptr) {
-      Result = new MatrixXd(V);
+    if (!ResultSet) {
+      Result = MatrixXd(V);
+      ResultSet = true;
     } else {
-      *Result = *Result + V;
+      Result = Result + V;
     }
   }
 
-  assert(Result && "No matrix generated");
-
-  std::cerr << "===== DTMC Generator Matrix =====" << std::endl;
-  std::cout << *Result << std::endl;
-  delete Result;
+  assert(ResultSet && "No matrix generated");
+  return Result;
 }

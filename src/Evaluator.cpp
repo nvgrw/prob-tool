@@ -1,11 +1,8 @@
-#include "Evaluator.hpp"
+#include <memory>
 
 #include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/Support/raw_ostream.h>
-#include <llvm/Transforms/Utils/Evaluator.h>
 
-#include <memory>
+#include "Evaluator.hpp"
 
 using namespace pt;
 
@@ -116,7 +113,7 @@ bool Evaluator::evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
   // Builder that inserts before start
   llvm::IRBuilder<> Builder(&*BB.begin());
 
-  // ** Initialize each variable that appears ** //
+  // Initialize each variable that appears
   unsigned Reg = 0;
   for (IntSymVar *Variable : Symbolic) {
     auto *Alloca = Variable->getAlloca();

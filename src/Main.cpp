@@ -4,6 +4,8 @@
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Support/MemoryBuffer.h>
 
+#include <unsupported/Eigen/SparseExtra>
+
 #include "Analysis.hpp"
 
 using namespace llvm;
@@ -28,6 +30,13 @@ int main(int Argc, char **Argv) {
 
   pt::Analysis A(ModuleOrError.get());
   A.dumpLabeled();
-  std::cout << A.run() << std::endl;
+
+  Eigen::MatrixXd Matrix = A.run();
+  if (Argc >= 3) {
+    Eigen::saveMarket(Matrix, Argv[2]);
+    return EXIT_SUCCESS;
+  }
+
+  std::cout << Matrix << std::endl;
   return EXIT_SUCCESS;
 }

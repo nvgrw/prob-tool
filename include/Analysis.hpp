@@ -3,7 +3,7 @@
 
 #include <unordered_map>
 
-#include <Eigen/Dense>
+#include <Eigen/Sparse>
 
 #include "Evaluator.hpp"
 
@@ -17,6 +17,9 @@ class Evaluator;
 } // namespace pt
 
 namespace pt {
+using SpMat = Eigen::SparseMatrix<double>;
+using SpTrp = Eigen::Triplet<double>;
+
 class Analysis {
 private:
   llvm::LLVMContext Context;
@@ -37,7 +40,7 @@ public:
     }
   }
 
-  Eigen::MatrixXd run();
+  SpMat run();
   void dumpLabeled();
 
 private:
@@ -49,12 +52,11 @@ private:
   void prepareModule();
   void computeLabels();
   void computeVariables();
-  std::vector<std::vector<Eigen::MatrixXd>> translateTransforms();
+  std::vector<std::vector<SpMat>> translateTransforms();
   void translateInstruction(pt::Evaluator const &Evaluator,
-                            std::vector<std::vector<Eigen::MatrixXd>> &Matrices,
+                            std::vector<std::vector<SpMat>> &Matrices,
                             llvm::Instruction const *Instruction);
-  Eigen::MatrixXd computeMatrix(
-      std::vector<std::vector<Eigen::MatrixXd>> const &Matrices) const;
+  SpMat computeMatrix(std::vector<std::vector<SpMat>> const &Matrices) const;
 };
 } // namespace pt
 

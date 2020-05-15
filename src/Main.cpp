@@ -31,7 +31,7 @@ int main(int Argc, char **Argv) {
   pt::Analysis A(ModuleOrError.get());
   A.dumpLabeled();
 
-  Eigen::MatrixXd Matrix = A.run();
+  pt::SpMat Matrix = A.run();
   if (Argc >= 3) {
     Eigen::saveMarket(Matrix, Argv[2]);
     return EXIT_SUCCESS;

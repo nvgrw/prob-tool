@@ -7,13 +7,19 @@
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Module.h>
 
-#include <Eigen/Dense>
 #include <unsupported/Eigen/KroneckerProduct>
 
 #include "Analysis.hpp"
 
 using namespace llvm;
-using Eigen::MatrixXd;
+
+namespace {
+pt::SpMat makeMat(unsigned Dim, std::vector<pt::SpTrp> Triplets) {
+  pt::SpMat Mat(Dim, Dim);
+  Mat.setFromTriplets(Triplets.begin(), Triplets.end());
+  return Mat;
+}
+} // anonymous namespace
 
 namespace pt {
 Analysis::Analysis(std::unique_ptr<llvm::Module> const &Module)
@@ -25,7 +31,7 @@ Analysis::Analysis(std::unique_ptr<llvm::Module> const &Module)
   dumpLabeled();
 }
 
-Eigen::MatrixXd Analysis::run() { return computeMatrix(translateTransforms()); }
+SpMat Analysis::run() { return computeMatrix(translateTransforms()); }
 
 void Analysis::dumpLabeled() {
   std::cerr << "===== Labeled Program =====" << std::endl;
@@ -122,8 +128,8 @@ void Analysis::computeVariables() {
   }
 }
 
-std::vector<std::vector<Eigen::MatrixXd>> Analysis::translateTransforms() {
-  std::vector<std::vector<MatrixXd>> Matrices;
+std::vector<std::vector<SpMat>> Analysis::translateTransforms() {
+  std::vector<std::vector<SpMat>> Matrices;
 
   // TODO: deal with multiple functions (currently assuming just 1)
   for (auto &F : Module->functions()) {
@@ -149,44 +155,44 @@ std::vector<std::vector<Eigen::MatrixXd>> Analysis::translateTransforms() {
   return Matrices;
 }
 
-void Analysis::translateInstruction(
-    pt::Evaluator const &Evaluator,
-    std::vector<std::vector<Eigen::MatrixXd>> &Matrices,
-    llvm::Instruction const *Instruction) {
+void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
+                                    std::vector<std::vector<SpMat>> &Matrices,
+                                    llvm::Instruction const *Instruction) {
   unsigned NumStates = Evaluator.getNumStates();
   unsigned FromLabel = Labels[Instruction];
-  MatrixXd StateIdentity(NumStates, NumStates);
+  SpMat StateIdentity(NumStates, NumStates);
   StateIdentity.setIdentity();
 
   switch (Instruction->getOpcode()) {
   case Instruction::Br: {
     const llvm::BranchInst *BI = llvm::cast<llvm::BranchInst>(Instruction);
     if (BI->isUnconditional()) {
-      MatrixXd TransferMatrix(MaxLabels, MaxLabels);
-      TransferMatrix.setZero();
-      TransferMatrix(FromLabel, BasicBlockLabels[BI->getSuccessor(0)]) = 1.0;
+      SpMat TransferMatrix = makeMat(
+          MaxLabels,
+          {SpTrp(FromLabel, BasicBlockLabels[BI->getSuccessor(0)], 1.0)});
       Matrices.push_back({StateIdentity, TransferMatrix});
       break;
     }
 
-    MatrixXd TrueStateMatrix(NumStates, NumStates),
-        FalseStateMatrix(NumStates, NumStates);
-    TrueStateMatrix.setZero();
-    FalseStateMatrix.setZero();
+    std::vector<SpTrp> TrueStateTriplets, FalseStateTriplets;
     for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
       const llvm::Constant *V = Evaluator.getValue(
           StateIndex, const_cast<llvm::Value *>(BI->getCondition()));
-      TrueStateMatrix(StateIndex, StateIndex) = V->isZeroValue() ? 0.0 : 1.0;
-      FalseStateMatrix(StateIndex, StateIndex) = !V->isZeroValue() ? 0.0 : 1.0;
+      TrueStateTriplets.push_back(
+          SpTrp(StateIndex, StateIndex, V->isZeroValue() ? 0.0 : 1.0));
+      FalseStateTriplets.push_back(
+          SpTrp(StateIndex, StateIndex, !V->isZeroValue() ? 0.0 : 1.0));
     }
 
-    MatrixXd TrueTransferMatrix(MaxLabels, MaxLabels),
-        FalseTransferMatrix(MaxLabels, MaxLabels);
-    TrueTransferMatrix.setZero();
-    FalseTransferMatrix.setZero();
+    SpMat TrueStateMatrix = makeMat(NumStates, TrueStateTriplets);
+    SpMat FalseStateMatrix = makeMat(NumStates, FalseStateTriplets);
 
-    TrueTransferMatrix(FromLabel, BasicBlockLabels[BI->getSuccessor(0)]) = 1.0;
-    FalseTransferMatrix(FromLabel, BasicBlockLabels[BI->getSuccessor(1)]) = 1.0;
+    SpMat TrueTransferMatrix =
+        makeMat(MaxLabels,
+                {SpTrp(FromLabel, BasicBlockLabels[BI->getSuccessor(0)], 1.0)});
+    SpMat FalseTransferMatrix =
+        makeMat(MaxLabels,
+                {SpTrp(FromLabel, BasicBlockLabels[BI->getSuccessor(1)], 1.0)});
 
     Matrices.push_back({TrueStateMatrix, TrueTransferMatrix});
     Matrices.push_back({FalseStateMatrix, FalseTransferMatrix});
@@ -199,23 +205,22 @@ void Analysis::translateInstruction(
       WeightSum += Choice.getChoiceWeight()->getZExtValue();
     }
 
-    MatrixXd TransferMatrix(MaxLabels, MaxLabels);
-    TransferMatrix.setZero();
+    std::vector<SpTrp> TransferTriplets;
     for (auto &Choice : CI->choices()) {
       unsigned ToLabel = BasicBlockLabels[Choice.getChoiceSuccessor()];
-      TransferMatrix(FromLabel, ToLabel) =
-          Choice.getChoiceWeight()->getZExtValue() / (double)WeightSum;
+      TransferTriplets.push_back(
+          SpTrp(FromLabel, ToLabel,
+                Choice.getChoiceWeight()->getZExtValue() / (double)WeightSum));
     }
 
+    SpMat TransferMatrix = makeMat(MaxLabels, TransferTriplets);
     Matrices.push_back({StateIdentity, TransferMatrix});
   } break;
   case Instruction::Switch:
     llvm_unreachable("Switch not implemented");
   case Instruction::Ret: {
-    MatrixXd TransferMatrix(MaxLabels, MaxLabels);
-    TransferMatrix.setZero();
-    TransferMatrix(FromLabel, FromLabel) = 1.0;
-
+    SpMat TransferMatrix =
+        makeMat(MaxLabels, {SpTrp(FromLabel, FromLabel, 1.0)});
     Matrices.push_back({StateIdentity, TransferMatrix});
   } break;
   case Instruction::Store: {
@@ -223,8 +228,7 @@ void Analysis::translateInstruction(
     unsigned StoreToVarIndex = ValToVarIndex[Store->getPointerOperand()];
     pt::IntSymVar const *Variable = Variables[StoreToVarIndex];
 
-    MatrixXd StateMatrix(NumStates, NumStates);
-    StateMatrix.setZero();
+    std::vector<SpTrp> StateTriplets;
     for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
       const llvm::Constant *V = Evaluator.getValue(
           StateIndex, const_cast<llvm::Value *>(Store->getValueOperand()));
@@ -234,13 +238,12 @@ void Analysis::translateInstruction(
       auto Location = Evaluator.getLocation(StateIndex);
       Location[StoreToVarIndex].Index = ValueIndex;
       unsigned DestinationStateIndex = Evaluator.getStateIndex(Location);
-      StateMatrix(StateIndex, DestinationStateIndex) = 1.0;
+      StateTriplets.push_back(SpTrp(StateIndex, DestinationStateIndex, 1.0));
     }
 
-    MatrixXd TransferMatrix(MaxLabels, MaxLabels);
-    TransferMatrix.setZero();
-    TransferMatrix(FromLabel, FromLabel + 1) = 1.0;
-
+    SpMat StateMatrix = makeMat(NumStates, StateTriplets);
+    SpMat TransferMatrix =
+        makeMat(MaxLabels, {SpTrp(FromLabel, FromLabel + 1, 1.0)});
     Matrices.push_back({StateMatrix, TransferMatrix});
   } break;
   default:
@@ -248,21 +251,21 @@ void Analysis::translateInstruction(
   }
 }
 
-MatrixXd Analysis::computeMatrix(
-    std::vector<std::vector<Eigen::MatrixXd>> const &Matrices) const {
-  MatrixXd Identity1(1, 1);
+SpMat Analysis::computeMatrix(
+    std::vector<std::vector<SpMat>> const &Matrices) const {
+  SpMat Identity1(1, 1);
   Identity1.setIdentity();
 
-  MatrixXd Result;
+  SpMat Result;
   bool ResultSet = false;
-  for (const std::vector<MatrixXd> &Kroneckerize : Matrices) {
-    MatrixXd V = std::accumulate(
-        Kroneckerize.begin(), Kroneckerize.end(), Identity1,
-        [&](const MatrixXd &Acc, const MatrixXd &Val) -> MatrixXd {
-          return Eigen::kroneckerProduct(Acc, Val).eval();
-        });
+  for (const std::vector<SpMat> &Kroneckerize : Matrices) {
+    SpMat V =
+        std::accumulate(Kroneckerize.begin(), Kroneckerize.end(), Identity1,
+                        [&](const SpMat &Acc, const SpMat &Val) -> SpMat {
+                          return Eigen::kroneckerProduct(Acc, Val).eval();
+                        });
     if (!ResultSet) {
-      Result = MatrixXd(V);
+      Result = V;
       ResultSet = true;
     } else {
       Result = Result + V;

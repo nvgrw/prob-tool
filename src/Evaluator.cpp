@@ -11,13 +11,7 @@ Evaluator::Evaluator(
     std::unordered_map<const llvm::Value *, unsigned int> IndexMap,
     const std::vector<IntSymVar *> &Symbolic)
     : DL(DL), TLI(TLI), IndexMap(IndexMap), Symbolic(Symbolic),
-      NumStates([&Symbolic]() {
-        unsigned V = 1;
-        for (pt::IntSymVar *SV : Symbolic) {
-          V *= SV->getRange();
-        }
-        return V;
-      }()) {
+      NumStates([&Symbolic]() { return Evaluator::getNumStates(Symbolic); }()) {
   assert(!Symbolic.empty() && "Can't evaluate without variables");
 }
 
@@ -36,9 +30,23 @@ llvm::Constant *Evaluator::getValue(const std::vector<StateAddressed> &Location,
   return getValue(Index, V);
 }
 
+unsigned Evaluator::getNumStates(std::vector<IntSymVar *> const &Symbolic) {
+  unsigned V = 1;
+  for (pt::IntSymVar *SV : Symbolic) {
+    V *= SV->getRange();
+  }
+  return V;
+}
+
 std::vector<Evaluator::StateAddressed>
 Evaluator::getLocation(unsigned int StateIndex) const {
-  std::vector<Evaluator::StateAddressed> Location(Symbolic.size());
+  return getLocation(Symbolic, StateIndex);
+}
+
+std::vector<Evaluator::StateAddressed>
+Evaluator::getLocation(std::vector<IntSymVar *> const &Symbolic,
+                       unsigned StateIndex) {
+  std::vector<StateAddressed> Location(Symbolic.size());
   for (int I = Symbolic.size() - 1; I >= 0; I--) {
     unsigned Range = Symbolic[I]->getRange();
     Location[I].Range = Range;

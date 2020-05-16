@@ -29,9 +29,10 @@ int main(int Argc, char **Argv) {
   }
 
   pt::Analysis A(ModuleOrError.get());
-  A.dumpLabeled();
+  //  A.dumpLabeled(); // TODO: make this an argument
 
   pt::SpMat Matrix = A.run();
+//  auto States = A.states();
   if (Argc >= 3) {
     Eigen::saveMarket(Matrix, Argv[2]);
     return EXIT_SUCCESS;

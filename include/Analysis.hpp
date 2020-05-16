@@ -41,6 +41,8 @@ public:
   }
 
   SpMat run();
+  std::tuple<Eigen::Matrix<std::string, Eigen::Dynamic, 1>, Eigen::MatrixXi>
+  states();
   void dumpLabeled();
 
 private:

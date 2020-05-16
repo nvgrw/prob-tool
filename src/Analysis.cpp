@@ -27,11 +27,43 @@ Analysis::Analysis(std::unique_ptr<llvm::Module> const &Module)
   prepareModule();
   computeLabels();
   computeVariables();
-
-  dumpLabeled();
 }
 
 SpMat Analysis::run() { return computeMatrix(translateTransforms()); }
+
+std::tuple<Eigen::Matrix<std::string, Eigen::Dynamic, 1>, Eigen::MatrixXi>
+Analysis::states() {
+  Eigen::Matrix<std::string, Eigen::Dynamic, 1> VariableNames(Variables.size());
+  for (unsigned I = 0; I < Variables.size(); I++) {
+    const auto *Variable = Variables[I];
+    const CallInst *CI = Variable->getDecl();
+    auto *DIV = cast<DIVariable>(
+        cast<MetadataAsValue>(CI->getOperand(1))->getMetadata());
+    VariableNames(I) = DIV->getName();
+  }
+
+  unsigned NumStates = Evaluator::getNumStates(Variables);
+  std::vector<Eigen::VectorXi> StateVectorsNoLabel;
+  for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+    auto State = Evaluator::getLocation(Variables, StateIndex);
+    Eigen::VectorXi StateVector(State.size() + 1);
+    for (unsigned ValueIndex = 0; ValueIndex < State.size(); ValueIndex++) {
+      StateVector(ValueIndex) = State[ValueIndex].Index;
+    }
+    StateVectorsNoLabel.push_back(StateVector);
+  }
+
+  Eigen::MatrixXi States(NumStates * MaxLabels, Variables.size() + 1);
+  unsigned Insert = 0;
+  for (unsigned Label = 0; Label < MaxLabels; Label++) {
+    for (auto V : StateVectorsNoLabel) {
+      V(V.rows() - 1) = Label;
+      States.row(Insert++) = V.transpose();
+    }
+  }
+
+  return std::make_tuple(VariableNames.transpose(), States);
+}
 
 void Analysis::dumpLabeled() {
   std::cerr << "===== Labeled Program =====" << std::endl;

@@ -183,8 +183,11 @@ public:
     return States[StateIndex]->getVal(V);
   }
   inline unsigned getNumStates() const { return NumStates; }
+  static unsigned getNumStates(std::vector<IntSymVar *> const &Symbolic);
 
   std::vector<StateAddressed> getLocation(unsigned StateIndex) const;
+  static std::vector<StateAddressed>
+  getLocation(std::vector<IntSymVar *> const &Symbolic, unsigned StateIndex);
   unsigned getStateIndex(std::vector<StateAddressed> const &Location) const;
 
 private:

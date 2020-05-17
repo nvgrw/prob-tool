@@ -114,7 +114,7 @@ std::vector<SpMat> Analysis::abstractPrints(
       // represented using the LLVM arbitrary precision integral type.
       assert(C && "Non-ConstantInt values are currently unsupported");
 
-      int64_t Value = C->getSExtValue();
+      int64_t Value = C->isOne() ? C->getZExtValue() : C->getSExtValue();
       ConstantValueToIndices[Value].push_back(StateIndex);
     }
 

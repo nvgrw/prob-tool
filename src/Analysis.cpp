@@ -1,5 +1,6 @@
 
 #include <iostream>
+#include <map>
 #include <memory>
 #include <numeric>
 
@@ -63,6 +64,81 @@ Analysis::states() {
   }
 
   return std::make_tuple(VariableNames.transpose(), States);
+}
+
+std::vector<SpMat> Analysis::abstractPrints(
+    std::unordered_set<std::string> const &Whitelist) const {
+  const Function &F = *Module->getFunction("main");
+
+  SmallPtrSet<const BasicBlock *, 8> BlocksToEvaluate;
+  SmallVector<const CallInst *, 8> CallInstructions;
+  // Find the blocks and expressions that need to be evaluated
+  for (const auto &BB : F) {
+    for (const auto &I : BB) {
+      const CallInst *Inst = dyn_cast<CallInst>(&I);
+      if (Inst == nullptr || !Inst->getType()->isVoidTy()) // not a void call
+        continue;
+      std::string Name(Inst->getCalledFunction()->getName());
+      if (Whitelist.find(Name) == Whitelist.end()) // not whitelisted
+        continue;
+
+      BlocksToEvaluate.insert(&BB);
+      CallInstructions.push_back(Inst);
+    }
+  }
+
+  // Compute block values
+  // Yes this does duplicate work, but there isn't enough time to make this nice
+  // right now.
+  std::unordered_map<const BasicBlock *, std::unique_ptr<pt::Evaluator>>
+      Evaluators;
+  for (const BasicBlock *Block : BlocksToEvaluate) {
+    auto Evaluator = std::make_unique<pt::Evaluator>(
+        Module->getDataLayout(), nullptr, ValToVarIndex, Variables);
+    Evaluator->evaluate(*const_cast<BasicBlock *>(Block));
+    Evaluators[Block] = std::move(Evaluator);
+  }
+
+  std::vector<SpMat> Results;
+  for (const CallInst *CI : CallInstructions) {
+    const auto &Evaluator = Evaluators[CI->getParent()];
+    unsigned NumStates = Evaluator->getNumStates();
+
+    // dynamically determine the range of values based on what is seen
+    std::map<int64_t, std::vector<unsigned>> ConstantValueToIndices;
+    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+      ConstantInt *C = dyn_cast<ConstantInt>(
+          Evaluator->getValue(StateIndex, CI->getArgOperand(0)));
+      // TODO: support these down the line
+      // This should not be a huge issue as booleans and integers are
+      // represented using the LLVM arbitrary precision integral type.
+      assert(C && "Non-ConstantInt values are currently unsupported");
+
+      int64_t Value = C->getSExtValue();
+      ConstantValueToIndices[Value].push_back(StateIndex);
+    }
+
+    // put these values into a matrix, using the fact that std::map is ordered
+    // by key
+    unsigned CurrentColumn = 0;
+    std::vector<SpTrp> AbstractTriplets;
+    for (const auto ValueAndIndices : ConstantValueToIndices) {
+      for (unsigned StateIndex : ValueAndIndices.second) {
+        AbstractTriplets.push_back(SpTrp(StateIndex, CurrentColumn, 1.0));
+      }
+      CurrentColumn++;
+    }
+
+    SpMat AbstractMatrix(NumStates, CurrentColumn);
+    AbstractMatrix.setFromTriplets(AbstractTriplets.begin(),
+                                   AbstractTriplets.end());
+    Eigen::MatrixXd TransitionMatrix(MaxLabels, 1);
+    TransitionMatrix.setOnes();
+    SpMat OutMatrix = Eigen::kroneckerProduct(AbstractMatrix, TransitionMatrix);
+    Results.push_back(OutMatrix);
+  }
+
+  return Results;
 }
 
 void Analysis::dumpLabeled() {
@@ -139,23 +215,21 @@ void Analysis::computeLabels() {
 
 void Analysis::computeVariables() {
   unsigned VariableIndex = 0;
-  // TODO: better handling for variables across functions
-  for (const auto &F : *Module) {
-    for (const auto &BB : F) {
-      for (const auto &I : BB) {
-        const CallInst *CI = dyn_cast<CallInst>(&I);
-        if (!CI || CI->getIntrinsicID() != Intrinsic::dbg_declare)
-          continue;
+  // TODO: better handling for multiple functions
+  const Function &F = *Module->getFunction("main");
+  for (const auto &BB : F) {
+    for (const auto &I : BB) {
+      const CallInst *CI = dyn_cast<CallInst>(&I);
+      if (!CI || CI->getIntrinsicID() != Intrinsic::dbg_declare)
+        continue;
 
-        // TODO: obtain range from user or metadata
-        Variables.push_back(new pt::IntSymVar(const_cast<CallInst *>(CI),
-                                              APInt(64, 0, false),
-                                              APInt(64, 2, false)));
-        ValToVarIndex[cast<ValueAsMetadata>(
-                          cast<MetadataAsValue>(CI->getOperand(0))
-                              ->getMetadata())
-                          ->getValue()] = VariableIndex++;
-      }
+      // TODO: obtain range from user or metadata
+      Variables.push_back(new pt::IntSymVar(const_cast<CallInst *>(CI),
+                                            APInt(64, 0, false),
+                                            APInt(64, 2, false)));
+      ValToVarIndex[cast<ValueAsMetadata>(
+                        cast<MetadataAsValue>(CI->getOperand(0))->getMetadata())
+                        ->getValue()] = VariableIndex++;
     }
   }
 }

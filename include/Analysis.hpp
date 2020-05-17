@@ -2,6 +2,7 @@
 #define PT_ANALYSIS_HPP
 
 #include <unordered_map>
+#include <unordered_set>
 
 #include <Eigen/Sparse>
 
@@ -43,6 +44,8 @@ public:
   SpMat run();
   std::tuple<Eigen::Matrix<std::string, Eigen::Dynamic, 1>, Eigen::MatrixXi>
   states();
+  std::vector<SpMat>
+  abstractPrints(std::unordered_set<std::string> const &Whitelist) const;
   void dumpLabeled();
 
 private:

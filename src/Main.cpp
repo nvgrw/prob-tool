@@ -29,15 +29,26 @@ int main(int Argc, char **Argv) {
   }
 
   pt::Analysis A(ModuleOrError.get());
-  //  A.dumpLabeled(); // TODO: make this an argument
+  A.dumpLabeled(); // TODO: make this an argument
 
   pt::SpMat Matrix = A.run();
-//  auto States = A.states();
+  std::vector<pt::SpMat> AbstractMatrices =
+      A.abstractPrints({"_pdcstd_print_bool"});
+  //  auto States = A.states();
   if (Argc >= 3) {
-    Eigen::saveMarket(Matrix, Argv[2]);
+    Eigen::saveMarket(Matrix, std::string(Argv[2]) + std::string(".mtx"));
+    for (unsigned I = 0; I < AbstractMatrices.size(); I++) {
+      const auto &Abstract = AbstractMatrices[I];
+      Eigen::saveMarket(Abstract, std::string(Argv[2]) + std::string(".") +
+                                      std::to_string(I) + ".mtx");
+    }
+
     return EXIT_SUCCESS;
   }
 
   std::cout << Matrix << std::endl;
+  for (auto Abstract : AbstractMatrices) {
+    std::cout << Abstract << std::endl;
+  }
   return EXIT_SUCCESS;
 }

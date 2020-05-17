@@ -34,7 +34,7 @@ int main(int Argc, char **Argv) {
   pt::SpMat Matrix = A.run();
   std::vector<pt::SpMat> AbstractMatrices =
       A.abstractPrints({"_pdcstd_print_bool"});
-  //  auto States = A.states();
+  auto States = A.states();
   if (Argc >= 3) {
     Eigen::saveMarket(Matrix, std::string(Argv[2]) + std::string(".mtx"));
     for (unsigned I = 0; I < AbstractMatrices.size(); I++) {
@@ -43,6 +43,11 @@ int main(int Argc, char **Argv) {
                                       std::to_string(I) + ".mtx");
     }
 
+    std::cout << "States:" << std::endl
+              << std::get<1>(States) << std::endl
+              << "Variable Names:" << std::endl
+              << std::get<0>(States).transpose() << std::endl;
+
     return EXIT_SUCCESS;
   }
 
@@ -50,5 +55,11 @@ int main(int Argc, char **Argv) {
   for (auto Abstract : AbstractMatrices) {
     std::cout << Abstract << std::endl;
   }
+
+  std::cout << "States:" << std::endl
+            << std::get<1>(States) << std::endl
+            << "Variable Names:" << std::endl
+            << std::get<0>(States).transpose() << std::endl;
+
   return EXIT_SUCCESS;
 }

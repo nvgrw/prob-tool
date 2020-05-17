@@ -136,5 +136,5 @@ bool Evaluator::evaluateOnce(llvm::Evaluator *EV, llvm::BasicBlock &BB,
   }
 
   llvm::BasicBlock::iterator CurInst = BB.begin();
-  return EV->EvaluateBlock(CurInst, NextBB, true);
+  return EV->EvaluateBlock(CurInst, NextBB, true, true);
 }

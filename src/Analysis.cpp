@@ -223,13 +223,20 @@ void Analysis::computeVariables() {
       if (!CI || CI->getIntrinsicID() != Intrinsic::dbg_declare)
         continue;
 
-      // TODO: obtain range from user or metadata
-      Variables.push_back(new pt::IntSymVar(const_cast<CallInst *>(CI),
-                                            APInt(64, 0, false),
-                                            APInt(64, 2, false)));
       ValToVarIndex[cast<ValueAsMetadata>(
                         cast<MetadataAsValue>(CI->getOperand(0))->getMetadata())
                         ->getValue()] = VariableIndex++;
+
+      auto *VarMeta = cast<DILocalVariable>(
+          cast<MetadataAsValue>(CI->getOperand(1))->getMetadata());
+      uint64_t SizeInBits = VarMeta->getType()->getSizeInBits();
+      int64_t MaxVal = ~(UINT64_MAX << (SizeInBits - 1));
+      int64_t MinVal = -MaxVal - 1;
+
+      // TODO: obtain range from user or metadata
+      Variables.push_back(new pt::IntSymVar(const_cast<CallInst *>(CI),
+                                            APInt(64, MinVal, true),
+                                            APInt(64, MaxVal, true)));
     }
   }
 }

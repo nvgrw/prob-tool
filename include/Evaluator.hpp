@@ -115,7 +115,8 @@ public:
   unsigned int getBitWidth() const { return Min.getBitWidth(); }
 
   iterator begin() {
-    return iterator(this, llvm::ConstantInt::get(Decl->getContext(), Min));
+    llvm::ConstantInt *Value = llvm::ConstantInt::get(Decl->getContext(), Min);
+    return iterator(this, Value);
   }
   iterator end() { return iterator(this, nullptr); }
 

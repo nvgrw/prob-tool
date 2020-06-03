@@ -34,7 +34,7 @@ file(GLOB SOURCES "src/*.cpp" "include/*.hpp")
 add_executable(prob-tool ${SOURCES})
 
 target_include_directories(prob-tool PRIVATE include)
-#set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address  -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -pedantic")
+#set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address,undefined -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
 
 target_link_libraries(prob-tool ${LLVM_LIBS})

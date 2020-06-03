@@ -82,7 +82,7 @@ public:
 
 protected:
   virtual void next(iterator *Curr) const = 0;
-  virtual unsigned getRange() const = 0;
+  virtual uint64_t getRange() const = 0;
   virtual unsigned getIndexOfValue(const llvm::Constant *V) const = 0;
 };
 
@@ -101,8 +101,8 @@ public:
 public:
   llvm::APInt const &getMin() const { return Min; }
   llvm::APInt const &getMax() const { return Max; }
-  unsigned getRange() const override {
-    return static_cast<unsigned>(Max.getSExtValue() - Min.getSExtValue() + 1);
+  uint64_t getRange() const override {
+    return Max.getSExtValue() - Min.getSExtValue() + 1;
   }
   unsigned getIndexOfValue(const llvm::Constant *V) const override {
     assert(llvm::isa<llvm::ConstantInt>(V) &&
@@ -139,16 +139,16 @@ private:
 class Evaluator {
 public:
   struct StateAddressed {
-    unsigned Index;
-    unsigned Range;
+    uint64_t Index;
+    uint64_t Range;
     StateAddressed() = default;
-    StateAddressed(unsigned Index, unsigned Range)
+    StateAddressed(uint64_t Index, uint64_t Range)
         : Index(Index), Range(Range) {}
   };
   struct InstanceElem : public StateAddressed {
     llvm::Constant *Value;
     InstanceElem() = default;
-    InstanceElem(unsigned Index, unsigned Range, llvm::Constant *Value)
+    InstanceElem(uint64_t Index, uint64_t Range, llvm::Constant *Value)
         : StateAddressed(Index, Range), Value(Value) {}
   };
 
@@ -158,7 +158,7 @@ private:
   const std::unordered_map<const llvm::Value *, unsigned> IndexMap;
   const std::vector<IntSymVar *> Symbolic;
 
-  const unsigned NumStates;
+  const uint64_t NumStates;
   llvm::Evaluator **States = nullptr;
 
 public:
@@ -170,7 +170,7 @@ public:
     if (!States)
       return;
 
-    for (int I = 0; I < NumStates; I++) {
+    for (uint64_t I = 0; I < NumStates; I++) {
       delete States[I];
     }
     delete[] States;
@@ -181,16 +181,16 @@ public:
 
   llvm::Constant *getValue(std::vector<StateAddressed> const &Location,
                            llvm::Value *V) const;
-  inline llvm::Constant *getValue(unsigned StateIndex, llvm::Value *V) const {
+  inline llvm::Constant *getValue(uint64_t StateIndex, llvm::Value *V) const {
     return States[StateIndex]->getVal(V);
   }
-  inline unsigned getNumStates() const { return NumStates; }
-  static unsigned getNumStates(std::vector<IntSymVar *> const &Symbolic);
+  inline uint64_t getNumStates() const { return NumStates; }
+  static uint64_t getNumStates(std::vector<IntSymVar *> const &Symbolic);
 
-  std::vector<StateAddressed> getLocation(unsigned StateIndex) const;
+  std::vector<StateAddressed> getLocation(uint64_t StateIndex) const;
   static std::vector<StateAddressed>
-  getLocation(std::vector<IntSymVar *> const &Symbolic, unsigned StateIndex);
-  unsigned getStateIndex(std::vector<StateAddressed> const &Location) const;
+  getLocation(std::vector<IntSymVar *> const &Symbolic, uint64_t StateIndex);
+  uint64_t getStateIndex(std::vector<StateAddressed> const &Location) const;
 
 private:
   void

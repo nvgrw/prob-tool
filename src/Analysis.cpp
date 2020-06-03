@@ -15,7 +15,7 @@
 using namespace llvm;
 
 namespace {
-pt::SpMat makeMat(unsigned Dim, std::vector<pt::SpTrp> Triplets) {
+pt::SpMat makeMat(uint64_t Dim, std::vector<pt::SpTrp> Triplets) {
   pt::SpMat Mat(Dim, Dim);
   Mat.setFromTriplets(Triplets.begin(), Triplets.end());
   return Mat;
@@ -43,19 +43,19 @@ Analysis::states() {
     VariableNames(I) = DIV->getName();
   }
 
-  unsigned NumStates = Evaluator::getNumStates(Variables);
+  uint64_t NumStates = Evaluator::getNumStates(Variables);
   std::vector<Eigen::VectorXi> StateVectorsNoLabel;
-  for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+  for (uint64_t StateIndex = 0; StateIndex < NumStates; StateIndex++) {
     auto State = Evaluator::getLocation(Variables, StateIndex);
     Eigen::VectorXi StateVector(State.size() + 1);
-    for (unsigned ValueIndex = 0; ValueIndex < State.size(); ValueIndex++) {
+    for (uint64_t ValueIndex = 0; ValueIndex < State.size(); ValueIndex++) {
       StateVector(ValueIndex) = State[ValueIndex].Index;
     }
     StateVectorsNoLabel.push_back(StateVector);
   }
 
   Eigen::MatrixXi States(NumStates * MaxLabels, Variables.size() + 1);
-  unsigned Insert = 0;
+  uint64_t Insert = 0;
   for (unsigned Label = 0; Label < MaxLabels; Label++) {
     for (auto V : StateVectorsNoLabel) {
       V(V.rows() - 1) = Label;
@@ -102,11 +102,11 @@ std::vector<SpMat> Analysis::abstractPrints(
   std::vector<SpMat> Results;
   for (const CallInst *CI : CallInstructions) {
     const auto &Evaluator = Evaluators[CI->getParent()];
-    unsigned NumStates = Evaluator->getNumStates();
+    uint64_t NumStates = Evaluator->getNumStates();
 
     // dynamically determine the range of values based on what is seen
-    std::map<int64_t, std::vector<unsigned>> ConstantValueToIndices;
-    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+    std::map<int64_t, std::vector<uint64_t>> ConstantValueToIndices;
+    for (uint64_t StateIndex = 0; StateIndex < NumStates; StateIndex++) {
       ConstantInt *C = dyn_cast<ConstantInt>(
           Evaluator->getValue(StateIndex, CI->getArgOperand(0)));
       // TODO: support these down the line
@@ -120,10 +120,10 @@ std::vector<SpMat> Analysis::abstractPrints(
 
     // put these values into a matrix, using the fact that std::map is ordered
     // by key
-    unsigned CurrentColumn = 0;
+    uint64_t CurrentColumn = 0;
     std::vector<SpTrp> AbstractTriplets;
     for (const auto ValueAndIndices : ConstantValueToIndices) {
-      for (unsigned StateIndex : ValueAndIndices.second) {
+      for (uint64_t StateIndex : ValueAndIndices.second) {
         AbstractTriplets.push_back(SpTrp(StateIndex, CurrentColumn, 1.0));
       }
       CurrentColumn++;
@@ -270,7 +270,7 @@ std::vector<std::vector<SpMat>> Analysis::translateTransforms() {
 void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
                                     std::vector<std::vector<SpMat>> &Matrices,
                                     llvm::Instruction const *Instruction) {
-  unsigned NumStates = Evaluator.getNumStates();
+  uint64_t NumStates = Evaluator.getNumStates();
   unsigned FromLabel = Labels[Instruction];
   SpMat StateIdentity(NumStates, NumStates);
   StateIdentity.setIdentity();
@@ -287,7 +287,7 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
     }
 
     std::vector<SpTrp> TrueStateTriplets, FalseStateTriplets;
-    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+    for (uint64_t StateIndex = 0; StateIndex < NumStates; StateIndex++) {
       const llvm::Constant *V = Evaluator.getValue(
           StateIndex, const_cast<llvm::Value *>(BI->getCondition()));
       TrueStateTriplets.push_back(
@@ -341,7 +341,7 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
     pt::IntSymVar const *Variable = Variables[StoreToVarIndex];
 
     std::vector<SpTrp> StateTriplets;
-    for (unsigned StateIndex = 0; StateIndex < NumStates; StateIndex++) {
+    for (uint64_t StateIndex = 0; StateIndex < NumStates; StateIndex++) {
       const llvm::Constant *V = Evaluator.getValue(
           StateIndex, const_cast<llvm::Value *>(Store->getValueOperand()));
       // todo: remove const cast if it works
@@ -349,7 +349,7 @@ void Analysis::translateInstruction(pt::Evaluator const &Evaluator,
       unsigned ValueIndex = Variable->getIndexOfValue(V);
       auto Location = Evaluator.getLocation(StateIndex);
       Location[StoreToVarIndex].Index = ValueIndex;
-      unsigned DestinationStateIndex = Evaluator.getStateIndex(Location);
+      uint64_t DestinationStateIndex = Evaluator.getStateIndex(Location);
       StateTriplets.push_back(SpTrp(StateIndex, DestinationStateIndex, 1.0));
     }
 

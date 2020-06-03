@@ -26,12 +26,12 @@ void Evaluator::evaluate(llvm::BasicBlock &BB) {
 llvm::Constant *Evaluator::getValue(const std::vector<StateAddressed> &Location,
                                     llvm::Value *V) const {
   assert(States && "getValue() called on unevaluated Evaluator");
-  unsigned Index = getStateIndex(Location);
+  uint64_t Index = getStateIndex(Location);
   return getValue(Index, V);
 }
 
-unsigned Evaluator::getNumStates(std::vector<IntSymVar *> const &Symbolic) {
-  unsigned V = 1;
+uint64_t Evaluator::getNumStates(std::vector<IntSymVar *> const &Symbolic) {
+  uint64_t V = 1;
   for (pt::IntSymVar *SV : Symbolic) {
     V *= SV->getRange();
   }
@@ -39,21 +39,21 @@ unsigned Evaluator::getNumStates(std::vector<IntSymVar *> const &Symbolic) {
 }
 
 std::vector<Evaluator::StateAddressed>
-Evaluator::getLocation(unsigned int StateIndex) const {
+Evaluator::getLocation(uint64_t StateIndex) const {
   return getLocation(Symbolic, StateIndex);
 }
 
 std::vector<Evaluator::StateAddressed>
 Evaluator::getLocation(std::vector<IntSymVar *> const &Symbolic,
-                       unsigned StateIndex) {
+                       uint64_t StateIndex) {
   std::vector<StateAddressed> Location(Symbolic.size());
   for (int I = Symbolic.size() - 1; I >= 0; I--) {
-    unsigned Range = Symbolic[I]->getRange();
+    uint64_t Range = Symbolic[I]->getRange();
     Location[I].Range = Range;
     if (StateIndex == 0) {
       continue;
     }
-    unsigned Index = StateIndex % Range;
+    uint64_t Index = StateIndex % Range;
     Location[I].Index = Index;
     StateIndex -= Index;
     StateIndex /= Range;
@@ -62,10 +62,10 @@ Evaluator::getLocation(std::vector<IntSymVar *> const &Symbolic,
   return Location;
 }
 
-unsigned
+uint64_t
 Evaluator::getStateIndex(const std::vector<StateAddressed> &Location) const {
-  unsigned Index = 0;
-  unsigned Multiplier = 1;
+  uint64_t Index = 0;
+  uint64_t Multiplier = 1;
   for (int I = Location.size() - 1; I >= 0; I--) {
     Index += Location[I].Index * Multiplier;
     Multiplier *= Location[I].Range;
@@ -99,8 +99,8 @@ void Evaluator::permuteVariablesAndExecute(
     llvm::Evaluator *EV = new llvm::Evaluator(DL, TLI);
     assert(evaluateOnce(EV, BB, Instance) && "Evaluation failed");
 
-    unsigned Index = 0;
-    unsigned Multiplier = 1;
+    uint64_t Index = 0;
+    uint64_t Multiplier = 1;
     for (int I = Instance.size() - 1; I >= 0; I--) {
       Index += Instance[I].Index * Multiplier;
       // ranges don't change but probably cheaper to store range in instance

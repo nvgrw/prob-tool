@@ -165,8 +165,7 @@ bool Analysis::hasLabel(const llvm::Value *Inst) const {
   return Labels.find(Inst) != Labels.end();
 }
 
-bool Analysis::isLabelable(const llvm::BasicBlock *BB,
-                           const llvm::Instruction *Inst) const {
+bool Analysis::isLabelable(const llvm::Instruction *Inst) const {
   switch (Inst->getOpcode()) {
   case Instruction::Br:
   case Instruction::Choose:
@@ -199,7 +198,7 @@ void Analysis::computeLabels() {
     for (auto &BB : F) {
       bool BlockLabeled = false;
       for (auto &I : BB) {
-        if (!isLabelable(&BB, &I))
+        if (!isLabelable(&I))
           continue;
 
         if (!BlockLabeled) {

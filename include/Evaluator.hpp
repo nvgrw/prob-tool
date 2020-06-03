@@ -46,6 +46,7 @@ public:
 
 protected:
   SymVar(llvm::CallInst *Decl) : Decl(Decl) {}
+  virtual ~SymVar() = default;
 
 private:
   class Iterator : public std::iterator<std::forward_iterator_tag, ValueT> {

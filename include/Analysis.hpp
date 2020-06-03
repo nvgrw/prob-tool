@@ -50,8 +50,7 @@ public:
 
 private:
   bool hasLabel(const llvm::Value *Inst) const;
-  bool isLabelable(const llvm::BasicBlock *BB,
-                   const llvm::Instruction *Inst) const;
+  bool isLabelable(const llvm::Instruction *Inst) const;
 
 private:
   void prepareModule();
